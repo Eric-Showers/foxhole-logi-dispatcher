@@ -1,66 +1,68 @@
-# This example requires the 'message_content' intent.
-
 import os
 import csv
 
 import discord
 from discord.ext import commands
+from discord import app_commands
 from dotenv import load_dotenv
 
 load_dotenv()
 
 intents = discord.Intents.default()
 intents.message_content = True
-
 bot = commands.Bot(command_prefix='/', intents=intents)
 
 db = {
-    'testguild': {
+    int(os.getenv('TESTGUILD_ID')): {
         'stockpiles': {}
     }
 }
 
-@bot.command()
-async def CreateStockpile(ctx, hex, town, type, name):
-    guildid = 'testguild'
+@bot.event
+async def on_ready():
+    #guild = discord.Object(id=os.getenv("TESTGUILD_ID"))
+    #bot.tree.copy_global_to(guild=guild)
+    #await bot.tree.sync(guild=guild)
+    print('Tree synced')
+
+@bot.tree.command(name='create', description='Create a new stockpile in the bot')
+async def create(inter: discord.Interaction, hex: str, town: str, type: str, name: str):
+    guildid = inter.guild_id
     stock_id = '{}_{}_{}_{}'.format(hex, town, type, name)
     if stock_id in db[guildid]['stockpiles']:
-        await ctx.send('Stockpile already exists')
+        await inter.response.send_message('Error: Stockpile already exists', ephemeral=True)
         return
     db[guildid]['stockpiles'][stock_id] = {
         'hex': hex,
         'town': town,
         'type': type,
         'name': name,
-        'inventory': {
-            'crates': {},
-            'items': {}
-        },
+        'inventory': {'crates': {}, 'items': {}},
         'quotas': {}
     }
-    await ctx.send('New stockpile named '+name+' at the '+type+' in '+town+', '+hex)
+    await inter.response.send_message('New stockpile named '+name+' at the '+type+' in '+town+', '+hex)
 
-@bot.command()
-async def DeleteStockpile(ctx, Hex, town, type, name):
-    guildid = 'testguild'
-    stock_id = '{}_{}_{}_{}'.format(Hex, town, type, name)
+@bot.tree.command(name='delete', description='Delete a stockpile from the bot')
+async def delete(inter: discord.Interaction, hex: str, town: str, type: str, name: str):
+    guildid = inter.guild_id
+    stock_id = '{}_{}_{}_{}'.format(hex, town, type, name)
     if stock_id not in db[guildid]['stockpiles']:
-        await ctx.send('Error: Stockpile does not exist')
+        await inter.response.send_message('Error: Stockpile does not exist', ephemeral=True)
         return
     del db[guildid]['stockpiles'][stock_id]
-    await ctx.send('Deleted stockpile named '+name+' at the '+type+' in '+town+', '+Hex)
+    await inter.response.send_message('Deleted stockpile named '+name+' at the '+type+' in '+town+', '+hex)
 
-@bot.command()
-async def SetQuota(ctx, Hex, town, type, name, quota_list):
-    guildid = 'testguild'
-    stock_id = '{}_{}_{}_{}'.format(Hex, town, type, name)
+@bot.tree.command(name='quota', description='Set quotas for a stockpile')
+async def quota(inter: discord.Interaction, hex: str, town: str, type: str, name: str, quota_list: str):
+    guildid = inter.guild_id
+    stock_id = '{}_{}_{}_{}'.format(hex, town, type, name)
     if stock_id not in db[guildid]['stockpiles']:
-        await ctx.send('Error: Stockpile does not exist')
+        await inter.response.send_message('Error: Stockpile does not exist', ephemeral=True)
         return
     else:
         stock = db[guildid]['stockpiles'][stock_id]
-    for row in quota_list.splitlines():
-        name, quota = row.split(',')
+    for row in quota_list.split(','):
+        name, quota = row.split('/')
         if int(quota) < 0:
             del stock['quotas'][name]
         else:
@@ -69,25 +71,27 @@ async def SetQuota(ctx, Hex, town, type, name, quota_list):
             quotas_str = '----------Quotas:----------\n'
             for item, quantity in stock['quotas'].items():
                 quotas_str += '{}: {}\n'.format(item, quantity)
-    await ctx.send('Updated quotas for stockpile named {} at the {} in {}, {}\n{}'.format(
-        name, type, town, Hex, quotas_str)
+    await inter.response.send_message('Updated quotas for stockpile named {} at the {} in {}, {}\n{}'.format(
+        name, type, town, hex, quotas_str)
     )
 
-@bot.command()
-async def GetRequirements(ctx):
-    guildid = 'testguild'
+@bot.tree.command(name='requirements', description='Get the requirements from all stockpiles')
+async def requirements(inter: discord.Interaction):
+    guildid = inter.guild_id
     if len(db[guildid]['stockpiles']) == 0:
-        await ctx.send('No stockpiles exist')
+        await inter.response.send_message('No stockpiles exist')
         return
     req_dict = {}
     for stock_id, stock in db[guildid]['stockpiles'].items():
+        if stock['quotas'] and stock_id not in req_dict:
+            req_dict[stock_id] = {}
         for name, quantity in stock['quotas'].items():
-            if name in stock['inventory']['crates'] and stock['inventory']['crates'][name] <= quantity:
-                if stock_id not in req_dict:
-                    req_dict[stock_id] = {}
+            if name in stock['inventory']['crates'] and quantity - stock['inventory']['crates'][name] > 0:
                 req_dict[stock_id][name] = quantity - stock['inventory']['crates'][name]
+            else:
+                req_dict[stock_id][name] = quantity
     if len(req_dict) == 0:
-        await ctx.send('No outstanding requirements')
+        await inter.response.send_message('No outstanding requirements')
         return
     req_str = '----------Requirements:----------\n'
     for stock_id, reqs in req_dict.items():
@@ -97,25 +101,35 @@ async def GetRequirements(ctx):
         )
         for name, quantity in reqs.items():
             req_str += '{}: {}\n'.format(name, quantity)
-    await ctx.send(req_str)
+    await inter.response.send_message(req_str)
         
-@bot.command()
-async def UpdateStockpile(ctx, Hex, town, type, name):
-    guildid = 'testguild'
-    stock_id = '{}_{}_{}_{}'.format(Hex, town, type, name)
+@bot.tree.command(name='update', description='Update the inventory of a stockpile using a TSV file')
+async def update(inter: discord.Interaction, hex: str, town: str, type: str, name: str):
+    guildid = inter.guild_id
+    stock_id = '{}_{}_{}_{}'.format(hex, town, type, name)
     if stock_id not in db[guildid]['stockpiles']:
-        await ctx.send('Error: Stockpile does not exist')
+        await inter.response.send_message('Error: Stockpile does not exist', ephemeral=True)
         return
     else:
         stock = db[guildid]['stockpiles'][stock_id]
-    if len(ctx.message.attachments) == 0:
-        await ctx.send('Error: No file attached')
+
+    await inter.response.send_message("Please reply with your TSV file.")
+
+    def check(msg):
+        return msg.author == inter.user and msg.attachments
+    
+    try:
+        msg = await bot.wait_for("message", check=check, timeout=60)  # Wait for 60s
+    except asyncio.TimeoutError:
+        await inter.followup.send("File upload timed out.", ephemeral=True)
         return
-    if 'text/tab-separated-values' not in ctx.message.attachments[0].content_type:
-        await ctx.send('Error: File must be a TSV, not {}'.format(ctx.message.attachments[0].content_type))
+
+    attachment = msg.attachments[0]
+    if 'text/tab-separated-values' not in attachment.content_type:
+        await inter.followup.send('Error: File must be a TSV, not {}'.format(attachment.content_type), ephemeral=True)
         return
-    print(ctx.message.attachments[0].content_type)
-    tsvFile = await ctx.message.attachments[0].read()
+    
+    tsvFile = await attachment.read()
     tsvFile = tsvFile.decode('utf-8').splitlines()
     tsvFile = tsvFile[1:]
     tsvData = csv.reader(tsvFile, delimiter='\t')
@@ -135,10 +149,8 @@ async def UpdateStockpile(ctx, Hex, town, type, name):
         inventory_str += '----------Items:----------\n'
         for item, quantity in stock['inventory']['items'].items():
             inventory_str += '{}: {}\n'.format(item, quantity)
-    await ctx.send('Updated stockpile named {} at the {} in {}, {}\nNew Inventory:\n{}'.format(
-        name, type, town, Hex, inventory_str)
+    await inter.followup.send('Updated stockpile named {} at the {} in {}, {}\nNew Inventory:\n{}'.format(
+        name, type, town, hex, inventory_str)
     )
-    
 
-
-bot.run(os.getenv("TOKEN"))
+bot.run(os.getenv('TOKEN'))
