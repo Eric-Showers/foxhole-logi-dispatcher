@@ -2,6 +2,7 @@ import os
 import csv
 
 import discord
+import asyncio
 from discord.ext import commands
 from discord import app_commands
 from dotenv import load_dotenv
@@ -26,36 +27,35 @@ async def on_ready():
     print('Tree synced')
 
 @bot.tree.command(name='create', description='Create a new stockpile in the bot')
-async def create(inter: discord.Interaction, hex: str, town: str, type: str, name: str):
+async def create(inter: discord.Interaction, town: str, type: str, name: str):
     guildid = inter.guild_id
-    stock_id = '{}_{}_{}_{}'.format(hex, town, type, name)
+    stock_id = '{}_{}_{}_{}'.format(town, type, name)
     if stock_id in db[guildid]['stockpiles']:
         await inter.response.send_message('Error: Stockpile already exists', ephemeral=True)
         return
     db[guildid]['stockpiles'][stock_id] = {
-        'hex': hex,
         'town': town,
         'type': type,
         'name': name,
         'inventory': {'crates': {}, 'items': {}},
         'quotas': {}
     }
-    await inter.response.send_message('New stockpile named '+name+' at the '+type+' in '+town+', '+hex)
+    await inter.response.send_message('New stockpile named '+name+' at the '+type+' in '+town)
 
 @bot.tree.command(name='delete', description='Delete a stockpile from the bot')
-async def delete(inter: discord.Interaction, hex: str, town: str, type: str, name: str):
+async def delete(inter: discord.Interaction, town: str, type: str, name: str):
     guildid = inter.guild_id
-    stock_id = '{}_{}_{}_{}'.format(hex, town, type, name)
+    stock_id = '{}_{}_{}_{}'.format(town, type, name)
     if stock_id not in db[guildid]['stockpiles']:
         await inter.response.send_message('Error: Stockpile does not exist', ephemeral=True)
         return
     del db[guildid]['stockpiles'][stock_id]
-    await inter.response.send_message('Deleted stockpile named '+name+' at the '+type+' in '+town+', '+hex)
+    await inter.response.send_message('Deleted stockpile named '+name+' at the '+type+' in '+town)
 
 @bot.tree.command(name='quota', description='Set quotas for a stockpile')
-async def quota(inter: discord.Interaction, hex: str, town: str, type: str, name: str, quota_list: str):
+async def quota(inter: discord.Interaction, town: str, type: str, name: str, quota_list: str):
     guildid = inter.guild_id
-    stock_id = '{}_{}_{}_{}'.format(hex, town, type, name)
+    stock_id = '{}_{}_{}_{}'.format(town, type, name)
     if stock_id not in db[guildid]['stockpiles']:
         await inter.response.send_message('Error: Stockpile does not exist', ephemeral=True)
         return
@@ -71,8 +71,8 @@ async def quota(inter: discord.Interaction, hex: str, town: str, type: str, name
             quotas_str = '----------Quotas:----------\n'
             for item, quantity in stock['quotas'].items():
                 quotas_str += '{}: {}\n'.format(item, quantity)
-    await inter.response.send_message('Updated quotas for stockpile named {} at the {} in {}, {}\n{}'.format(
-        name, type, town, hex, quotas_str)
+    await inter.response.send_message('Updated quotas for stockpile named {} at the {} in {}\n{}'.format(
+        name, type, town, quotas_str)
     )
 
 @bot.tree.command(name='requirements', description='Get the requirements from all stockpiles')
@@ -96,17 +96,17 @@ async def requirements(inter: discord.Interaction):
     req_str = '----------Requirements:----------\n'
     for stock_id, reqs in req_dict.items():
         stock = db[guildid]['stockpiles'][stock_id]
-        req_str += '{} at the {} in {}, {}\n'.format(
-            stock['name'], stock['type'], stock['town'], stock['hex']
+        req_str += '{} at the {} in {}\n'.format(
+            stock['name'], stock['type'], stock['town']
         )
         for name, quantity in reqs.items():
             req_str += '{}: {}\n'.format(name, quantity)
     await inter.response.send_message(req_str)
         
 @bot.tree.command(name='update', description='Update the inventory of a stockpile using a TSV file')
-async def update(inter: discord.Interaction, hex: str, town: str, type: str, name: str):
+async def update(inter: discord.Interaction, town: str, type: str, name: str):
     guildid = inter.guild_id
-    stock_id = '{}_{}_{}_{}'.format(hex, town, type, name)
+    stock_id = '{}_{}_{}_{}'.format(town, type, name)
     if stock_id not in db[guildid]['stockpiles']:
         await inter.response.send_message('Error: Stockpile does not exist', ephemeral=True)
         return
@@ -141,16 +141,8 @@ async def update(inter: discord.Interaction, hex: str, town: str, type: str, nam
             stock['inventory']['crates'][item_name] = quantity
         else:
             stock['inventory']['items'][item_name] = quantity
-    if len(stock['inventory']['crates']) > 0:
-        inventory_str = '----------Crates:----------\n'
-        for item, quantity in stock['inventory']['crates'].items():
-            inventory_str += '{}: {}\n'.format(item, quantity)
-    if len(stock['inventory']['items']) > 0:
-        inventory_str += '----------Items:----------\n'
-        for item, quantity in stock['inventory']['items'].items():
-            inventory_str += '{}: {}\n'.format(item, quantity)
-    await inter.followup.send('Updated stockpile named {} at the {} in {}, {}\nNew Inventory:\n{}'.format(
-        name, type, town, hex, inventory_str)
+    await inter.followup.send('Updated stockpile named {} at the {} in {}\n'.format(
+        name, type, town)
     )
 
 bot.run(os.getenv('TOKEN'))
