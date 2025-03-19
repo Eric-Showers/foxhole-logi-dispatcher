@@ -9,11 +9,12 @@ class DbHandler():
     # Adds a new guild (discord server)
     def addGuild(self, guild_id, name):
         # TODO: - Add error handling for duplicate guilds
-        self.cur.execute("""
-            INSERT INTO guilds (id, name)
-            VALUES (?, ?)
-            """, (guild_id, name)
-        )
+        # Check if guild already exists
+        self.cur.execute("SELECT id FROM guilds WHERE id = ?", (guild_id,))
+        if self.cur.fetchone():
+            raise ValueError(f"Guild {name} is already registered.")
+        # Insert the new guild
+        self.cur.execute("INSERT INTO guilds (id, name) VALUES (?, ?)", (guild_id, name))
         self.conn.commit()
 
     # Fetches all stockpiles for a guild
@@ -23,18 +24,19 @@ class DbHandler():
             """, (guild_id,)
         )
         res = self.cur.fetchall()
+        
+        if not res:
+            return []
+        
         stockpiles = []
         for r in res:
-            cur_stock = {
+            self.cur.execute("SELECT name FROM towns WHERE id = ?", (r[2],))
+            town = self.cur.fetchone()
+            stockpiles.append({
                 'id': r[0],
-                'name': r[1]
-            }
-            self.cur.execute("""
-                SELECT name FROM towns WHERE id = ?
-                """, (r[2],)
-            )
-            cur_stock['town'] = self.cur.fetchone()[0]
-            stockpiles.append(cur_stock)
+                'name': r[1],
+                'town': town[0] if town else 'Unknown'
+            })
         return stockpiles
     
     # Creates a new stockpile

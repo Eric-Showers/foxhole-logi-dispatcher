@@ -28,7 +28,11 @@ async def on_ready():
 @bot.tree.command(name='register', description='Register this discord server with the bot')
 async def register(inter: discord.Interaction):
     # TODO: - Error msg for already registered guild
-    db.addGuild(inter.guild_id, inter.guild.name)
+    try:
+        db.addGuild(inter.guild_id, inter.guild.name)
+    except ValueError as e:
+        await inter.response.send_message(str(e), ephemeral=True)
+        return
     await inter.response.send_message('Registered server {}'.format(inter.guild.name))
 
 
@@ -36,8 +40,8 @@ async def register(inter: discord.Interaction):
 async def list(inter: discord.Interaction):
     # TODO: - Error msg for unregistered guild
     stockpiles = db.fetchStockpiles(inter.guild_id)
-    if len(stockpiles) == 0:
-        await inter.response.send_message('No stockpiles registered')
+    if stockpiles == []:
+        await inter.response.send_message('No stockpiles registered for this server', ephemeral=True)
         return
     stock_list = ['Stock ID | Name | Town']
     for stock in stockpiles:
