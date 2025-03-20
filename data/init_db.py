@@ -5,7 +5,7 @@ import csv
 from foxapi import FoxAPI
 
 CATALOG_PATH = './infantry-59/'
-DB_FILE = "test.db"
+DB_PATH = "test.db"
 api = FoxAPI(shard='1')
 
 # Taken from https://github.com/clapfoot/warapi?tab=readme-ov-file#map-icons
@@ -122,9 +122,9 @@ def getItems():
     print('Items CSV created')        
 
 
-def init_db_tables():
+def init_db_tables(db_path):
     """Initialize the database and create tables if they do not exist."""
-    conn = sqlite3.connect(DB_FILE)
+    conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
 
     cursor.executescript("""
@@ -149,9 +149,7 @@ def init_db_tables():
         id INTEGER PRIMARY KEY,
         name TEXT NOT NULL,
         guild_id INTEGER NOT NULL,
-        town_id INTEGER NOT NULL,
         structure_id INTEGER NOT NULL,
-        FOREIGN KEY (town_id) REFERENCES towns(id),
         FOREIGN KEY (guild_id) REFERENCES guilds(id),
         FOREIGN KEY (structure_id) REFERENCES structures(id)
     );
@@ -174,7 +172,8 @@ def init_db_tables():
     CREATE TABLE IF NOT EXISTS inventory (
         item_id INTEGER NOT NULL,
         stock_id INTEGER NOT NULL,
-        amount INTEGER NOT NULL,
+        crates INTEGER NOT NULL DEFAULT 0,
+        non_crates INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (item_id, stock_id),
         FOREIGN KEY (item_id) REFERENCES items(id),
         FOREIGN KEY (stock_id) REFERENCES stockpiles(id)
@@ -204,8 +203,8 @@ def init_db_tables():
     conn.close()
     print("Database tables created.")
 
-def load_csv_to_db():
-    conn = sqlite3.connect(DB_FILE)
+def load_csv_to_db(db_path, catalog_path):
+    conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
 
     with open(CATALOG_PATH+"towns.csv", newline='', encoding="utf-8") as f:
@@ -248,6 +247,6 @@ def load_csv_to_db():
 if __name__ == "__main__":
     getTownsAndStructures()
     getItems()
-    init_db_tables()
-    load_csv_to_db()
+    init_db_tables(DB_PATH)
+    load_csv_to_db(DB_PATH, CATALOG_PATH)
     print("Database initialized")

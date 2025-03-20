@@ -27,7 +27,6 @@ async def on_ready():
 
 @bot.tree.command(name='register', description='Register this discord server with the bot')
 async def register(inter: discord.Interaction):
-    # TODO: - Error msg for already registered guild
     try:
         db.addGuild(inter.guild_id, inter.guild.name)
     except ValueError as e:
@@ -38,122 +37,90 @@ async def register(inter: discord.Interaction):
 
 @bot.tree.command(name='list', description='List all stockpiles registered on the discord server')
 async def list(inter: discord.Interaction):
-    # TODO: - Error msg for unregistered guild
     stockpiles = db.fetchStockpiles(inter.guild_id)
     if stockpiles == []:
         await inter.response.send_message('No stockpiles registered for this server', ephemeral=True)
         return
-    stock_list = ['Stock ID | Name | Town']
+    stock_list = ['Stock ID   |   Name   |   Town   |   Type']
     for stock in stockpiles:
-        stock_list.append(f"{stock['id']} | {stock['name']} | {stock['town']}")
+        stock_list.append(f"{stock['id']}   |   {stock['name']}   |   {stock['town']}   |   {stock['type']}")
     stock_str = '\n'.join(stock_list)
     await inter.response.send_message(stock_str)
 
 
 @bot.tree.command(name='create', description='Create a new stockpile in the bot')
 async def create(inter: discord.Interaction, town: str, type: str, name: str):
-    # TODO: - Error msg for nonexistent towns and structures
-    #       - Error msg for duplicate stockpiles
-    db.create(inter.guild_id, town, type, name)
+    try:
+        db.create(inter.guild_id, town, type, name)
+    except ValueError as e:
+        await inter.response.send_message(str(e), ephemeral=True)
+        return
     await inter.response.send_message(f"Created stockpile named {name} at the {type} in {town}")
 
 
 @bot.tree.command(name='delete', description='Delete a stockpile from the bot')
-async def delete(inter: discord.Interaction, town: str, type: str, name: str):
-    # TODO: - Error msg for nonexistent stockpile
-    db.delete(inter.guild_id, town, type, name)
-    await inter.response.send_message(f"Deleted stockpile named {name} at the {type} in {town}")
-
-
-@bot.tree.command(name='quota', description='Set quotas for a stockpile')
-async def quota(inter: discord.Interaction, town: str, type: str, name: str, quota_list: str):
-    # TODO: - Complete integration with DB
-    guildid = inter.guild_id
-    stock_id = '{}_{}_{}_{}'.format(town, type, name)
-    if stock_id not in db[guildid]['stockpiles']:
-        await inter.response.send_message('Error: Stockpile does not exist', ephemeral=True)
+async def delete(inter: discord.Interaction, stock_id: int):
+    try:
+        db.delete(inter.guild_id, stock_id)
+    except ValueError as e:
+        await inter.response.send_message(str(e), ephemeral=True)
         return
-    else:
-        stock = db[guildid]['stockpiles'][stock_id]
-    for row in quota_list.split(','):
-        name, quota = row.split('/')
-        if int(quota) < 0:
-            del stock['quotas'][name]
-        else:
-            stock['quotas'][name] = int(quota)
-        if len(stock['quotas']) > 0:
-            quotas_str = '----------Quotas:----------\n'
-            for item, quantity in stock['quotas'].items():
-                quotas_str += '{}: {}\n'.format(item, quantity)
-    await inter.response.send_message('Updated quotas for stockpile named {} at the {} in {}\n{}'.format(
-        name, type, town, quotas_str)
-    )
+    await inter.response.send_message(f"Deleted stockpile with ID {stock_id}")
+
+
+@bot.tree.command(name='addquotas', description="""Set quotas for a stockpile. 
+quota_list in the form \"display_name:quantity, display_name:quantity\"""")
+async def addQuotas(inter: discord.Interaction, stock_id: int, quota_list: str):
+    try:
+        db.addQuotas(inter.guild_id, stock_id, quota_list)
+    except ValueError as e:
+        await inter.response.send_message(str(e), ephemeral=True)
+        return
+    await inter.response.send_message(f"Added quotas to stockpile with ID {stock_id}")
 
 
 @bot.tree.command(name='requirements', description='Get the requirements from all stockpiles')
 async def requirements(inter: discord.Interaction):
-    # TODO: - Complete integratio with DB
-    guildid = inter.guild_id
-    if len(db[guildid]['stockpiles']) == 0:
-        await inter.response.send_message('No stockpiles exist')
+    try:
+        req_dict = db.getRequirements(inter.guild_id)
+    except ValueError as e:
+        await inter.response.send_message(str(e), ephemeral=True)
         return
-    req_dict = {}
-    for stock_id, stock in db[guildid]['stockpiles'].items():
-        if stock['quotas'] and stock_id not in req_dict:
-            req_dict[stock_id] = {}
-        for name, quantity in stock['quotas'].items():
-            if name in stock['inventory']['crates'] and quantity - stock['inventory']['crates'][name] > 0:
-                req_dict[stock_id][name] = quantity - stock['inventory']['crates'][name]
-            else:
-                req_dict[stock_id][name] = quantity
-    if len(req_dict) == 0:
-        await inter.response.send_message('No outstanding requirements')
+    if not req_dict:
+        await inter.response.send_message('No requirements found', ephemeral=True)
         return
-    req_str = '----------Requirements:----------\n'
+    req_list = ['```Stock ID | Quantity |  Crates Needed \n----------------------------------------------']
     for stock_id, reqs in req_dict.items():
-        stock = db[guildid]['stockpiles'][stock_id]
-        req_str += '{} at the {} in {}\n'.format(
-            stock['name'], stock['type'], stock['town']
-        )
-        for name, quantity in reqs.items():
-            req_str += '{}: {}\n'.format(name, quantity)
+        for item, quantity in reqs['requirements'].items():
+            req_list.append(f"{stock_id: <8} | {quantity: <8} | {item} ")
+    req_str = '\n'.join(req_list)+'```'
     await inter.response.send_message(req_str)
 
   
 @bot.tree.command(name='update', description='Update the inventory of a stockpile using a TSV file')
-async def update(inter: discord.Interaction, town: str, type: str, name: str):
-    # TODO: - Complete integratio with DB
-
+async def update(inter: discord.Interaction, stock_id: int):
+    # Prompt user for TSV file
     await inter.response.send_message("Please reply with your TSV file.")
-
     def check(msg):
         return msg.author == inter.user and msg.attachments
-    
     try:
         msg = await bot.wait_for("message", check=check, timeout=60)  # Wait for 60s
     except asyncio.TimeoutError:
         await inter.followup.send("File upload timed out.", ephemeral=True)
         return
 
+    # Ingest TSV file
     attachment = msg.attachments[0]
     if 'text/tab-separated-values' not in attachment.content_type:
         await inter.followup.send('Error: File must be a TSV, not {}'.format(attachment.content_type), ephemeral=True)
         return
-    
     tsvFile = await attachment.read()
     tsvFile = tsvFile.decode('utf-8').splitlines()
-    tsvFile = tsvFile[1:]
-    tsvData = csv.reader(tsvFile, delimiter='\t')
-    for row in tsvData:
-        quantity = int(row[3])
-        item_name = row[4]
-        crated = True if row[5] == 'true' else False
-        if crated:
-            stock['inventory']['crates'][item_name] = quantity
-        else:
-            stock['inventory']['items'][item_name] = quantity
-    await inter.followup.send('Updated stockpile named {} at the {} in {}\n'.format(
-        name, type, town)
-    )
+    try:
+        db.updateInventory(inter.guild_id, stock_id, tsvFile)
+    except ValueError as e:
+        await inter.followup.send(str(e), ephemeral=True)
+        return
+    await inter.followup.send('Updated stockpile with ID {}'.format(stock_id))
 
 bot.run(os.getenv('TOKEN'))
