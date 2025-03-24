@@ -16,13 +16,15 @@ intents.message_content = True
 bot = commands.Bot(command_prefix='/', intents=intents)
 
 db = DbHandler(os.getenv('DB_PATH'))
+sync_commands = True
 
 @bot.event
 async def on_ready():
-    #guild = discord.Object(id=os.getenv("TESTGUILD_ID"))
-    #bot.tree.copy_global_to(guild=guild)
-    #await bot.tree.sync(guild=guild)
-    print('Tree synced')
+    if sync_commands:
+        guild = discord.Object(id=os.getenv("TESTGUILD_ID"))
+        bot.tree.copy_global_to(guild=guild)
+        await bot.tree.sync(guild=guild)
+        print('Tree synced')
 
 
 @bot.tree.command(name='register', description='Register this discord server with the bot')
@@ -37,18 +39,19 @@ async def register(inter: discord.Interaction):
 
 @bot.tree.command(name='list', description='List all stockpiles registered on the discord server')
 async def list(inter: discord.Interaction):
-    stockpiles = db.fetchStockpiles(inter.guild_id)
-    if stockpiles == []:
-        await inter.response.send_message('No stockpiles registered for this server', ephemeral=True)
+    try:
+        stockpiles = db.fetchStockpiles(inter.guild_id)
+    except ValueError as e:
+        await inter.response.send_message(str(e), ephemeral=True)
         return
-    stock_list = ['Stock ID   |   Name   |   Town   |   Type']
+    stock_list = ['```Stock ID |     Name     |     Town     | Type \n--------------------------------------------------']
     for stock in stockpiles:
-        stock_list.append(f"{stock['id']}   |   {stock['name']}   |   {stock['town']}   |   {stock['type']}")
-    stock_str = '\n'.join(stock_list)
+        stock_list.append(f"{stock['id']: <8} | {stock['name']: <12} | {stock['town']: <12} | {stock['type']}")
+    stock_str = '\n'.join(stock_list)+'```'
     await inter.response.send_message(stock_str)
 
 
-@bot.tree.command(name='create', description='Create a new stockpile in the bot')
+@bot.tree.command(name='create', description='Add a new stockpile in the bot')
 async def create(inter: discord.Interaction, town: str, type: str, name: str):
     try:
         db.create(inter.guild_id, town, type, name)
@@ -68,7 +71,7 @@ async def delete(inter: discord.Interaction, stock_id: int):
     await inter.response.send_message(f"Deleted stockpile with ID {stock_id}")
 
 
-@bot.tree.command(name='addquotas', description="""Set quotas for a stockpile. 
+@bot.tree.command(name='addquotas', description="""Adds quotas to a stockpile. 
 quota_list in the form \"display_name:quantity, display_name:quantity\"""")
 async def addQuotas(inter: discord.Interaction, stock_id: int, quota_list: str):
     try:
@@ -77,6 +80,61 @@ async def addQuotas(inter: discord.Interaction, stock_id: int, quota_list: str):
         await inter.response.send_message(str(e), ephemeral=True)
         return
     await inter.response.send_message(f"Added quotas to stockpile with ID {stock_id}")
+
+
+@bot.tree.command(name='deletequotas', description="Removes all quotas for a stockpile.")
+async def deleteQuotas(inter: discord.Interaction, stock_id: int):
+    try:
+        db.deleteQuotas(inter.guild_id, stock_id)
+    except ValueError as e:
+        await inter.response.send_message(str(e), ephemeral=True)
+        return
+    await inter.response.send_message(f"Deleted quotas for stockpile with ID {stock_id}")
+
+
+@bot.tree.command(name='listquotas', description='List the quotas that are set on a stockpile')
+async def listQuotas(inter: discord.Interaction, stock_id: int):
+    try:
+        quota_list = db.fetchQuotas(inter.guild_id, stock_id)
+    except ValueError as e:
+        await inter.response.send_message(str(e), ephemeral=True)
+        return
+    quota_set_string = 'Quota set string:\n'+', '.join([f"{q['display_name']}:{q['quantity']}" for q in quota_list])
+    quota_table = ['```Name                    | Quantity \n------------------------------']
+    for q in quota_list:
+        quota_table.append(f"{q['display_name']: <23} | {q['quantity']}")
+    quota_string = '\n'.join(quota_table)+'\n\n'+quota_set_string+'```'
+    await inter.response.send_message(quota_string)
+
+
+@bot.tree.command(name='createpreset', description='Create a quota preset')
+async def createPreset(inter: discord.Interaction, preset_name: str, quota_list:str):
+    try:
+        db.createPreset(inter.guild_id, preset_name, quota_list)
+    except ValueError as e:
+        await inter.response.send_message(str(e), ephemeral=True)
+        return
+    await inter.response.send_message(f"Preset {preset_name} created succesfully")
+
+
+@bot.tree.command(name='deletepreset', description='Deletes a named preset (does not remove from active quotas)')
+async def deletePreset(inter: discord.Interaction, preset_name: str):
+    try:
+        db.deletePreset(inter.guild_id, preset_name)
+    except ValueError as e:
+        await inter.response.send_message(str(e), ephemeral=True)
+        return
+    await inter.response.send_message(f"Preset {preset_name} deleted successfully")
+
+
+@bot.tree.command(name='applypreset', description='Adds a preset quota to a stockpile (does not overwrite existing quotas)')
+async def applyPreset(inter: discord.Interaction, stock_id: str, preset_name: str):
+    try:
+        db.applyPreset(inter.guild_id, stock_id, preset_name)
+    except ValueError as e:
+        await inter.response.send_message(str(e), ephemeral=True)
+        return
+    await inter.response.send_message(f"Preset {preset_name} added to stockpile with id {stock_id}")
 
 
 @bot.tree.command(name='requirements', description='Get the requirements from all stockpiles')

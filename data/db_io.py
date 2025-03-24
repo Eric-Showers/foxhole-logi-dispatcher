@@ -41,7 +41,7 @@ class DbHandler():
         res = self.cur.fetchall()
         
         if not res:
-            return []
+            raise ValueError("No stockpiles exist")
         
         stockpiles = []
         for r in res:
@@ -103,18 +103,9 @@ class DbHandler():
         self.checkStockId(stock_id)
         
         # Delete related inventory and quotas, then stockpile
-        self.cur.execute("""
-            DELETE FROM inventory WHERE stock_id = ?
-            """, (stock_id,)
-        )
-        self.cur.execute("""
-            DELETE FROM quotas WHERE stock_id = ?
-            """, (stock_id,)
-        )
-        self.cur.execute("""
-            DELETE FROM stockpiles WHERE id = ?
-            """, (stock_id,)
-        )
+        self.cur.execute("DELETE FROM inventory WHERE stock_id = ?", (stock_id,))
+        self.cur.execute("DELETE FROM quotas WHERE stock_id = ?", (stock_id,))
+        self.cur.execute("DELETE FROM stockpiles WHERE id = ?", (stock_id,))
         self.conn.commit()
 
     # Updates inventories
@@ -205,7 +196,123 @@ class DbHandler():
                 """, (stock_id, item_id, quantity, quantity)
             )
         self.conn.commit()
+
+
+    # Deletes all quotas set on a stockpile
+    def deleteQuotas(self, guild_id, stock_id):
+        self.checkRegistration(guild_id)
+        self.checkStockId(stock_id)
+        self.cur.execute("DELETE FROM quotas WHERE stock_id = ?", (stock_id,))
+        self.conn.commit()
+
+
+    # Fetches the quotas set on a stockpile
+    def fetchQuotas(self, guild_id, stock_id):
+        self.checkRegistration(guild_id)
+        self.checkStockId(stock_id)
+        # Get quota data
+        self.cur.execute("""
+            SELECT i.display_name, q.amount
+            FROM quotas q
+            JOIN items i ON q.item_id = i.id
+            WHERE q.stock_id = ?
+            """, (stock_id,)
+        )
+        res = self.cur.fetchall()
+        if not res:
+            raise ValueError('No quotas found')
+        
+        return [{'display_name': r[0], 'quantity': r[1]} for r in res]
     
+    # Adds a quota preset string to the database
+    def createPreset(self, guild_id, preset_name, quota_data):
+        self.checkRegistration(guild_id)
+        # Check if a preset already exists with this name
+        self.cur.execute("SELECT name FROM presets WHERE name = ?", (preset_name,))
+        if self.cur.fetchone():
+            raise ValueError(f"Preset named {preset_name} already exists")
+
+        # Validate item data in the quota string
+        quotas = {}
+        for q in quota_data.split(', '):
+            name, quantity = q.split(':')
+            quotas[name] = int(quantity)
+        quota_ids = {}
+        for name, quantity in quotas.items():
+            self.cur.execute("""
+                SELECT id FROM items WHERE display_name = ?
+                """, (name,)
+            )
+            item_id = self.cur.fetchone()
+            if item_id:
+                quota_ids[item_id[0]] = quantity
+            else:
+                # Search for similar names
+                self.cur.execute("""
+                    SELECT display_name FROM items
+                    WHERE display_name LIKE ?
+                    """, (f'%{name}%',))
+                similar_name = self.cur.fetchone()
+                if similar_name:
+                    raise ValueError(f"Item {name} not found, did you mean {similar_name[0]}?")
+                else:
+                    raise ValueError(f"Item {name} not found")
+        # Add preset to DB
+        self.cur.execute(
+            "INSERT INTO presets (name, quota_string, guild_id) VALUES (?,?,?)"
+            , (preset_name, quota_data, guild_id)
+        )
+
+    # Deletes a named preset from the database
+    def deletePreset(self, guild_id, preset_name):
+        self.checkRegistration(guild_id)
+        # Check if a preset already exists with this name
+        self.cur.execute("SELECT name FROM presets WHERE name = ?", (preset_name,))
+        if not self.cur.fetchone():
+            raise ValueError(f"No preset named {preset_name} exists")
+        self.cur.execute("DELETE FROM presets WHERE name=?", (preset_name,))
+
+    
+    # Adds a preset quota to a stockpile
+    def applyPreset(self, guild_id, stock_id, preset_name):
+        self.checkRegistration(guild_id)
+        self.checkStockId(stock_id)
+        # Parse quota string and get item ids
+        self.cur.execute(
+            "SELECT quota_string FROM presets WHERE name = ?",
+            (preset_name,)
+        )
+        quota_data = self.cur.fetchone()
+        if not quota_data:
+            raise ValueError(f"No preset named {preset_name} exists")
+        print(quota_data)
+        quotas = {}
+        for q in quota_data[0].split(', '):
+            name, quantity = q.split(':')
+            quotas[name] = int(quantity)
+        quota_ids = {}
+        for name, quantity in quotas.items():
+            self.cur.execute("""
+                SELECT id FROM items WHERE display_name = ?
+                """, (name,)
+            )
+            item_id = self.cur.fetchone()
+            if item_id:
+                quota_ids[item_id[0]] = quantity
+            else:
+                raise ValueError(f"Could not find item {name}")
+            
+        # Update quotas, add to existing values
+        for item_id, quantity in quota_ids.items():
+            self.cur.execute("""
+                INSERT INTO quotas (stock_id, item_id, amount)
+                VALUES (?, ?, ?)
+                ON CONFLICT (stock_id, item_id)
+                DO UPDATE SET amount = amount + ?
+                """, (stock_id, item_id, quantity, quantity)
+            )
+
+
     # Fetches the requirements to meet quotas for all stockpiles
     def getRequirements(self, guild_id):
         self.checkRegistration(guild_id)
@@ -230,7 +337,7 @@ class DbHandler():
                 """, (stock_id,)
             )
             reqs = self.cur.fetchall()
-            req_dict[stock_name] = {
+            req_dict[stock_id] = {
                 'stock_id': stock_id,
                 'stock_name': stock_name,
                 'requirements': {quota[0]: quota[1] - quota[2] if quota[2] else quota[1] for quota in reqs}

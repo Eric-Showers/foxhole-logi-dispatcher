@@ -197,6 +197,13 @@ def init_db_tables(db_path):
         FOREIGN KEY (from_id) REFERENCES towns(id),
         FOREIGN KEY (to_id) REFERENCES towns(id)
     );
+                         
+    CREATE TABLE IF NOT EXISTS presets (
+        name TEXT NOT NULL PRIMARY KEY,
+        quota_string TEXT NOT NULL,
+        guild_id INTEGER NOT NULL,
+        FOREIGN KEY (guild_id) REFERENCES guilds(id)
+    );
     """)
 
     conn.commit()
