@@ -150,6 +150,7 @@ def init_db_tables(db_path):
         name TEXT NOT NULL,
         guild_id INTEGER NOT NULL,
         structure_id INTEGER NOT NULL,
+        last_update INTEGER,
         FOREIGN KEY (guild_id) REFERENCES guilds(id),
         FOREIGN KEY (structure_id) REFERENCES structures(id)
     );

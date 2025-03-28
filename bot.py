@@ -1,6 +1,5 @@
 import os
-import csv
-import sqlite3
+import time
 
 import discord
 import asyncio
@@ -16,7 +15,40 @@ intents.message_content = True
 bot = commands.Bot(command_prefix='/', intents=intents)
 
 db = DbHandler(os.getenv('DB_PATH'))
-sync_commands = True
+sync_commands = False
+
+
+# Converts a timestamp to a relative time string (eg. "6 hours ago")
+def get_relative_time_str(prev_time):
+    if prev_time is None:
+        return "Never"
+    current_time = time.time()
+    elapsed_time = current_time - prev_time
+
+    if elapsed_time < 60:
+        return f"{int(elapsed_time)} seconds ago"
+    elif elapsed_time < 3600:
+        return f"{int(elapsed_time / 60)} minutes ago"
+    elif elapsed_time < 86400:
+        return f"{int(elapsed_time / 3600)} hours ago"
+    else:
+        return f"{int(elapsed_time / 86400)} days ago"
+
+
+# Formats a response string into a list of strings, each with a max length of 1990 characters
+# Does not split lines
+def chunk_response(table_str):
+    chunks = []
+    current_chunk = ''
+    for line in table_str.split('\n'):
+        if len(current_chunk) + len(line) + 1 > 1990:
+            chunks.append(current_chunk)
+            current_chunk = ''
+        current_chunk += line + '\n'
+    if current_chunk:
+        chunks.append(current_chunk)
+    return chunks
+
 
 @bot.event
 async def on_ready():
@@ -44,10 +76,16 @@ async def list(inter: discord.Interaction):
     except ValueError as e:
         await inter.response.send_message(str(e), ephemeral=True)
         return
-    stock_list = ['```Stock ID |     Name     |     Town     | Type \n--------------------------------------------------']
+    stock_str = '```Stock ID |     Name     |        Town        |     Type     |   Last Updated\n--------------------------------------------------'
     for stock in stockpiles:
-        stock_list.append(f"{stock['id']: <8} | {stock['name']: <12} | {stock['town']: <12} | {stock['type']}")
-    stock_str = '\n'.join(stock_list)+'```'
+        stock_str += "\n{: <8} | {: <12} | {: <18} | {: <12} | {}".format(
+            stock['id'],
+            stock['name'],
+            stock['town'],
+            stock['type'],
+            get_relative_time_str(stock['last_update'])
+        )
+    stock_str += '```'
     await inter.response.send_message(stock_str)
 
 
@@ -147,20 +185,31 @@ async def requirements(inter: discord.Interaction):
     if not req_dict:
         await inter.response.send_message('No requirements found', ephemeral=True)
         return
-    req_list = ['```Stock ID | Quantity |  Crates Needed \n----------------------------------------------']
-    for stock_id, reqs in req_dict.items():
-        for item, quantity in reqs['requirements'].items():
-            req_list.append(f"{stock_id: <8} | {quantity: <8} | {item} ")
-    req_str = '\n'.join(req_list)+'```'
-    await inter.response.send_message(req_str)
 
-  
+    # Multiple stockpiles could overflow the 2000 char limit
+    resp_str = ''
+    for stock_id, stock_info in req_dict.items():
+        resp_str += f"\n{stock_info['name']}, {stock_info['town']} {stock_info['type']} (ID: {stock_id})"
+        for item, quantity in stock_info['requirements'].items():
+            resp_str += f"\n    {quantity: <5} {item}"
+        resp_str += '\n'
+    # Handle character limit
+    chunks = chunk_response(resp_str)
+    await inter.response.send_message(f"```{chunks[0]}```")
+    for chunk in chunks[1:]:
+        await inter.followup.send(f"```{chunk}```")
+
+
 @bot.tree.command(name='update', description='Update the inventory of a stockpile using a TSV file')
 async def update(inter: discord.Interaction, stock_id: int):
     # Prompt user for TSV file
     await inter.response.send_message("Please reply with your TSV file.")
     def check(msg):
-        return msg.author == inter.user and msg.attachments
+        return (
+            msg.author == inter.user 
+            and msg.channel == inter.channel
+            and msg.attachments
+        )
     try:
         msg = await bot.wait_for("message", check=check, timeout=60)  # Wait for 60s
     except asyncio.TimeoutError:

@@ -1,3 +1,4 @@
+import time
 import sqlite3
 import asyncio
 import csv
@@ -35,7 +36,7 @@ class DbHandler():
     def fetchStockpiles(self, guild_id):
         self.checkRegistration(guild_id)
         self.cur.execute("""
-            SELECT id, name, structure_id FROM stockpiles WHERE guild_id = ?
+            SELECT id, name, structure_id, last_update FROM stockpiles WHERE guild_id = ?
             """, (guild_id,)
         )
         res = self.cur.fetchall()
@@ -53,7 +54,8 @@ class DbHandler():
                 'id': r[0],
                 'name': r[1],
                 'town': town,
-                'type': struct_type
+                'type': struct_type,
+                'last_update': r[3]
             })
         return stockpiles
     
@@ -150,6 +152,9 @@ class DbHandler():
                 DO UPDATE SET crates = ?, non_crates = ?
                 """, (d['item_id'], stock_id, d['crated'], d['non_crated'], d['crated'], d['non_crated'])
             )
+
+        # Update stockpile timestamp
+        self.cur.execute("UPDATE stockpiles SET last_update = ? WHERE id = ?", (int(time.time()),stock_id))
         self.conn.commit()
 
     # Updates quotas
@@ -262,6 +267,7 @@ class DbHandler():
             "INSERT INTO presets (name, quota_string, guild_id) VALUES (?,?,?)"
             , (preset_name, quota_data, guild_id)
         )
+        self.conn.commit()
 
     # Deletes a named preset from the database
     def deletePreset(self, guild_id, preset_name):
@@ -271,6 +277,7 @@ class DbHandler():
         if not self.cur.fetchone():
             raise ValueError(f"No preset named {preset_name} exists")
         self.cur.execute("DELETE FROM presets WHERE name=?", (preset_name,))
+        self.conn.commit()
 
     
     # Adds a preset quota to a stockpile
@@ -285,7 +292,6 @@ class DbHandler():
         quota_data = self.cur.fetchone()
         if not quota_data:
             raise ValueError(f"No preset named {preset_name} exists")
-        print(quota_data)
         quotas = {}
         for q in quota_data[0].split(', '):
             name, quantity = q.split(':')
@@ -311,15 +317,20 @@ class DbHandler():
                 DO UPDATE SET amount = amount + ?
                 """, (stock_id, item_id, quantity, quantity)
             )
+        self.conn.commit()
 
 
     # Fetches the requirements to meet quotas for all stockpiles
     def getRequirements(self, guild_id):
         self.checkRegistration(guild_id)
-        # Get guild's stockpiles
+        # Get stockpile id, name, town, and structure type for this guild
         self.cur.execute("""
-            SELECT id, name FROM stockpiles WHERE guild_id = ?
-            """, (723282644271366194,)
+            SELECT s.id, s.name, t.name, st.type
+            FROM stockpiles s
+            JOIN structures st ON s.structure_id = st.id
+            JOIN towns t ON st.town_id = t.id
+            WHERE s.guild_id = ?
+            """, (guild_id,)
         )
         res = self.cur.fetchall()
         if not res:
@@ -327,7 +338,7 @@ class DbHandler():
         
         req_dict = {}
         for stockpile_info in res:
-            stock_id, stock_name = stockpile_info
+            stock_id, stock_name, stock_town, stock_struct = stockpile_info
             self.cur.execute("""
                 SELECT i.display_name, q.amount, inv.crates
                 FROM quotas q
@@ -337,11 +348,20 @@ class DbHandler():
                 """, (stock_id,)
             )
             reqs = self.cur.fetchall()
+            if not reqs:
+                continue
             req_dict[stock_id] = {
-                'stock_id': stock_id,
-                'stock_name': stock_name,
-                'requirements': {quota[0]: quota[1] - quota[2] if quota[2] else quota[1] for quota in reqs}
+                'name': stock_name,
+                'town': stock_town,
+                'type': stock_struct,
+                'requirements': {}
             }
+            for r in reqs:
+                item_name, quota, inv_crates = r
+                if inv_crates is None:
+                    req_dict[stock_id]['requirements'][item_name] = quota
+                elif inv_crates < quota:
+                    req_dict[stock_id]['requirements'][item_name] = quota - inv_crates
         
         return req_dict
 
