@@ -1,5 +1,12 @@
-# Ignore venv dir
+# Ignore venv dirs
 testenv/
+prodenv/
+
+# Ignore data files
+data/*/*.csv
+data/*/*.json
+data/*.db
+data/*.ipynb
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
