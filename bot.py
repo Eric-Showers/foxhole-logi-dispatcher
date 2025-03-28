@@ -189,7 +189,13 @@ async def requirements(inter: discord.Interaction):
     # Multiple stockpiles could overflow the 2000 char limit
     resp_str = ''
     for stock_id, stock_info in req_dict.items():
-        resp_str += f"\n{stock_info['name']}, {stock_info['town']} {stock_info['type']} (ID: {stock_id})"
+        resp_str += "\n{}, {} {} (ID: {}, last updated: {})\n".format(
+            stock_info['name'],
+            stock_info['town'],
+            stock_info['type'],
+            stock_id,
+            get_relative_time_str(stock_info['last_update'])
+        )
         for item, quantity in stock_info['requirements'].items():
             resp_str += f"\n    {quantity: <5} {item}"
         resp_str += '\n'

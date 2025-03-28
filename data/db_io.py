@@ -325,7 +325,7 @@ class DbHandler():
         self.checkRegistration(guild_id)
         # Get stockpile id, name, town, and structure type for this guild
         self.cur.execute("""
-            SELECT s.id, s.name, t.name, st.type
+            SELECT s.id, s.name, s.last_update, t.name, st.type
             FROM stockpiles s
             JOIN structures st ON s.structure_id = st.id
             JOIN towns t ON st.town_id = t.id
@@ -338,7 +338,7 @@ class DbHandler():
         
         req_dict = {}
         for stockpile_info in res:
-            stock_id, stock_name, stock_town, stock_struct = stockpile_info
+            stock_id, stock_name, last_update, stock_town, stock_struct = stockpile_info
             self.cur.execute("""
                 SELECT i.display_name, q.amount, inv.crates
                 FROM quotas q
@@ -354,6 +354,7 @@ class DbHandler():
                 'name': stock_name,
                 'town': stock_town,
                 'type': stock_struct,
+                'last_update': last_update,
                 'requirements': {}
             }
             for r in reqs:
