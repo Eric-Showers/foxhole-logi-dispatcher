@@ -17,10 +17,13 @@ class DbHandler():
             raise ValueError("Server not registered with this bot")
     
     # Checks if a stockpile exists for this id
-    def checkStockId(self, stock_id):
-        self.cur.execute("SELECT 1 FROM stockpiles WHERE id = ?", (stock_id,))
-        if not self.cur.fetchone():
+    def checkStockId(self, guild_id, stock_id):
+        self.cur.execute("SELECT guild_id FROM stockpiles WHERE id = ?", (stock_id,))
+        res = self.cur.fetchone()
+        if not res:
             raise ValueError("Stockpile not found")
+        if res[0] != guild_id:
+            raise ValueError("Stockpile not accessible from this guild")
 
     # Adds a new guild (discord server)
     def addGuild(self, guild_id, name):
@@ -102,7 +105,7 @@ class DbHandler():
     # Deletes a stockpile and it's related inventory and quotas
     def delete(self, guild_id, stock_id):
         self.checkRegistration(guild_id)
-        self.checkStockId(stock_id)
+        self.checkStockId(guild_id, stock_id)
         
         # Delete related inventory and quotas, then stockpile
         self.cur.execute("DELETE FROM inventory WHERE stock_id = ?", (stock_id,))
@@ -113,7 +116,7 @@ class DbHandler():
     # Updates inventories
     def updateInventory(self, guild_id, stock_id, tsv_file):
         self.checkRegistration(guild_id)
-        self.checkStockId(stock_id)
+        self.checkStockId(guild_id, stock_id)
         
         # Read TSV file
         reader = csv.reader(tsv_file, delimiter='\t')
@@ -143,7 +146,8 @@ class DbHandler():
             else:
                 d['item_id'] = item_id[0]
 
-        # Update inventory, overwrite existing values
+        # Update inventory by deleting previous values, then adding new ones
+        self.cur.execute("DELETE FROM inventory WHERE stock_id = ?", (stock_id,))
         for d in data:
             self.cur.execute("""
                 INSERT INTO inventory (item_id, stock_id, crates, non_crates)
@@ -157,11 +161,68 @@ class DbHandler():
         self.cur.execute("UPDATE stockpiles SET last_update = ? WHERE id = ?", (int(time.time()),stock_id))
         self.conn.commit()
 
+    # Handles a TSV file with multiple stockpiles
+    def updateMulti(self, guild_id, tsv_file):
+        self.checkRegistration(guild_id)
+
+        # Read TSV file
+        reader = csv.reader(tsv_file, delimiter='\t')
+        header = next(reader)
+        if header != TSV_HEADER.split('\t'):
+            raise ValueError("Invalid TSV file, headers do not match")
+        
+        # Save stock_id, code_name, name, quantity, crated
+        data = []
+        stock_ids = []
+        for r in reader:
+            item_data = {
+                'stock_id': r[0].split('.')[0],
+                'code_name': r[9], 
+                'display_name': r[4], 
+                'crated': int(r[3]) if r[5] == 'true' else 0, 
+                'non_crated': int(r[3]) if r[5] == 'false' else 0
+            }
+            if item_data['stock_id'] not in stock_ids:
+                self.checkStockId(guild_id, item_data['stock_id'])
+                stock_ids.append(item_data['stock_id'])
+            data.append(item_data)
+
+        # Get item_id for each item
+        for d in data:
+            self.cur.execute("""
+                SELECT id FROM items WHERE code_name = ?
+                """, (d['code_name'],)
+            )
+            item_id = self.cur.fetchone()
+            if not item_id:
+                raise ValueError(f"Item {d['display_name']} not found")
+            else:
+                d['item_id'] = item_id[0]
+
+        # Update inventory by deleting previous values, then adding new ones
+        for id in stock_ids:
+            self.cur.execute("DELETE FROM inventory WHERE stock_id = ?", (id,))
+        for d in data:
+            self.cur.execute("""
+                INSERT INTO inventory (item_id, stock_id, crates, non_crates)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT (item_id, stock_id)
+                DO UPDATE SET crates = ?, non_crates = ?
+                """, (d['item_id'], d['stock_id'], d['crated'], d['non_crated'], d['crated'], d['non_crated'])
+            )
+
+        # Update stockpile timestamp
+        for id in stock_ids:
+            self.cur.execute("UPDATE stockpiles SET last_update = ? WHERE id = ?", (int(time.time()),id))
+        self.conn.commit()
+        return stock_ids
+
+        
     # Updates quotas
     # quota_data is a string of the form "display_name:quantity, display_name:quantity, ..."
     def addQuotas(self, guild_id, stock_id, quota_data):
         self.checkRegistration(guild_id)
-        self.checkStockId(stock_id)
+        self.checkStockId(guild_id, stock_id)
 
         # Parse quota_data
         quotas = {}
@@ -206,7 +267,7 @@ class DbHandler():
     # Deletes all quotas set on a stockpile
     def deleteQuotas(self, guild_id, stock_id):
         self.checkRegistration(guild_id)
-        self.checkStockId(stock_id)
+        self.checkStockId(guild_id, stock_id)
         self.cur.execute("DELETE FROM quotas WHERE stock_id = ?", (stock_id,))
         self.conn.commit()
 
@@ -214,7 +275,7 @@ class DbHandler():
     # Fetches the quotas set on a stockpile
     def fetchQuotas(self, guild_id, stock_id):
         self.checkRegistration(guild_id)
-        self.checkStockId(stock_id)
+        self.checkStockId(guild_id, stock_id)
         # Get quota data
         self.cur.execute("""
             SELECT i.display_name, q.amount
@@ -283,7 +344,7 @@ class DbHandler():
     # Adds a preset quota to a stockpile
     def applyPreset(self, guild_id, stock_id, preset_name):
         self.checkRegistration(guild_id)
-        self.checkStockId(stock_id)
+        self.checkStockId(guild_id, stock_id)
         # Parse quota string and get item ids
         self.cur.execute(
             "SELECT quota_string FROM presets WHERE name = ?",

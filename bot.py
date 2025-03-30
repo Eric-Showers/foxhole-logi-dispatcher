@@ -236,4 +236,35 @@ async def update(inter: discord.Interaction, stock_id: int):
         return
     await inter.followup.send('Updated stockpile with ID {}'.format(stock_id))
 
+
+@bot.tree.command(name='updatemulti', description='Update the inventory of multiple stockpiles using a TSV file')
+async def updateMulti(inter: discord.Interaction):
+    # Prompt user for TSV file
+    await inter.response.send_message("Please reply with your TSV file.")
+    def check(msg):
+        return (
+            msg.author == inter.user 
+            and msg.channel == inter.channel
+            and msg.attachments
+        )
+    try:
+        msg = await bot.wait_for("message", check=check, timeout=60)  # Wait for 60s
+    except asyncio.TimeoutError:
+        await inter.followup.send("File upload timed out.", ephemeral=True)
+        return
+
+    # Ingest TSV file
+    attachment = msg.attachments[0]
+    if 'text/tab-separated-values' not in attachment.content_type:
+        await inter.followup.send('Error: File must be a TSV, not {}'.format(attachment.content_type), ephemeral=True)
+        return
+    tsvFile = await attachment.read()
+    tsvFile = tsvFile.decode('utf-8').splitlines()
+    try:
+        stock_ids = db.updateMulti(inter.guild_id, tsvFile)
+    except ValueError as e:
+        await inter.followup.send(str(e), ephemeral=True)
+        return
+    await inter.followup.send('Updated stockpiles with IDs {}'.format(stock_ids))
+
 bot.run(os.getenv('TOKEN'))
