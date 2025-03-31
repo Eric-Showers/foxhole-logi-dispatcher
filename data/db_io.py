@@ -24,6 +24,23 @@ class DbHandler():
             raise ValueError("Stockpile not found")
         if res[0] != guild_id:
             raise ValueError("Stockpile not accessible from this guild")
+    
+    # Takes a row (list) from the items table and returns a dict
+    def _getItemInfoDict(self, item_row):
+        return {
+            'id': item_row[0],
+            'code_name': item_row[1],
+            'display_name': item_row[2],
+            'category': item_row[3],
+            'per_crate': item_row[4],
+            'factory_queue': item_row[5],
+            'mpf_queue': item_row[6],
+            'faction': item_row[7],
+            'reserve_max_quantity': item_row[8],
+            'shippable_type': item_row[9],
+            'ingredients': item_row[10],
+            'description': item_row[11]
+        }
 
     # Adds a new guild (discord server)
     def addGuild(self, guild_id, name):
@@ -314,6 +331,7 @@ class DbHandler():
                 quota_ids[item_id[0]] = quantity
             else:
                 # Search for similar names
+                # TODO: Better search for similar names
                 self.cur.execute("""
                     SELECT display_name FROM items
                     WHERE display_name LIKE ?
@@ -380,6 +398,52 @@ class DbHandler():
             )
         self.conn.commit()
 
+    # Fetches all presets for a guild
+    def fetchPresets(self, guild_id):
+        self.checkRegistration(guild_id)
+        # Get all presets for this guild
+        self.cur.execute("""
+            SELECT name FROM presets WHERE guild_id = ?
+            """, (guild_id,)
+        )
+        res = self.cur.fetchall()
+        if not res:
+            raise ValueError("No presets exist")
+        
+        return res[0]
+    
+    # Fetches all quotas in a preset, returns dict of quotas, dict of item info
+    def fetchPresetList(self, guild_id, preset_name):
+        self.checkRegistration(guild_id)
+        # Get quota data
+        self.cur.execute("""
+            SELECT quota_string FROM presets WHERE name = ?
+            """, (preset_name,)
+        )
+        res = self.cur.fetchone()
+        if not res:
+            raise ValueError("No preset with name {preset_name} found")
+        # Parse quota string
+        quotas = {}
+        for q in res[0].split(', '):
+            display_name, quantity = q.split(':')
+            quotas[display_name] = int(quantity)
+
+        quota_list = []
+        for display_name, quantity in quotas.items():
+            self.cur.execute("""
+                SELECT * FROM items WHERE display_name = ?
+                """, (display_name,)
+            )
+            this_info = self.cur.fetchone()
+            if not this_info:
+                raise ValueError(f"Internal Error (notify dev): Item {display_name} not found")
+            quota_list.append({
+                'quantity': quantity,
+                'info': self._getItemInfoDict(this_info)
+            })
+        
+        return quota_list
 
     # Fetches the requirements to meet quotas for all stockpiles
     def getRequirements(self, guild_id):

@@ -50,6 +50,27 @@ def chunk_response(table_str):
     return chunks
 
 
+# Takes a list of item dicts (w/ 'quantity' & 'info') and sorts into categories & descending order
+def organizeItemList(item_list):
+    # Sort quotas into categories
+    categorized = {}
+    for item in item_list:
+        db_cat = item['info']['category'].split('::')
+        if db_cat[0] == 'EItemCategory':
+            cat = db_cat[1]
+        elif db_cat[0] == 'EVehicleProfileType':
+            cat = 'Vehicle'
+        else:
+            cat = 'Other'
+        if cat not in categorized:
+            categorized[cat] = []
+        categorized[cat].append({'display_name': item['info']['display_name'], 'quantity': item['quantity']})
+    # Sort each category by quantity, descending order
+    for cat, quotas in categorized.items():
+        categorized[cat] = sorted(quotas, key=lambda x: x['quantity'], reverse=True)
+    return categorized
+
+
 @bot.event
 async def on_ready():
     if sync_commands:
@@ -112,6 +133,7 @@ async def delete(inter: discord.Interaction, stock_id: int):
 @bot.tree.command(name='addquotas', description="""Adds quotas to a stockpile. 
 quota_list in the form \"display_name:quantity, display_name:quantity\"""")
 async def addQuotas(inter: discord.Interaction, stock_id: int, quota_list: str):
+    # TODO: Investigate apostrophes and quotes
     try:
         db.addQuotas(inter.guild_id, stock_id, quota_list)
     except ValueError as e:
@@ -176,8 +198,46 @@ async def applyPreset(inter: discord.Interaction, stock_id: str, preset_name: st
     await inter.response.send_message(f"Preset {preset_name} added to stockpile with id {stock_id}")
 
 
+@bot.tree.command(name='listpresets', description='List all preset names')
+async def listPresets(inter: discord.Interaction):
+    try:
+        preset_list = db.fetchPresets(inter.guild_id)
+    except ValueError as e:
+        await inter.response.send_message(str(e), ephemeral=True)
+        return
+    
+    preset_str = '```Preset Names\n-------------\n{}```'.format('\n'.join(preset_list))
+    await inter.response.send_message(preset_str)
+
+
+@bot.tree.command(name='showpreset', description='Show the contents of a preset')
+async def showPreset(inter: discord.Interaction, preset_name: str):
+    try:
+        quota_list = db.fetchPresetList(inter.guild_id, preset_name)
+    except ValueError as e:
+        await inter.response.send_message(str(e), ephemeral=True)
+        return
+    
+    categorized = organizeItemList(quota_list)
+
+    # Build table
+    quota_table = ['Category  |  Quantity  | Item Name\n-----------------------------------']
+    for cat, quotas in categorized.items():
+        quota_table.append(f"{cat: <9} | {quotas[0]['quantity']: <10} | {quotas[0]['display_name']}")
+        for q in quotas[1:]:
+            quota_table.append(f"{'': <9} | {q['quantity']: <10} | {q['display_name']}")
+    quota_string = '\n'.join(quota_table)
+
+    # Handle overflow
+    chunks = chunk_response(quota_string)
+    await inter.response.send_message(f"```{chunks[0]}```")
+    for chunk in chunks[1:]:
+        await inter.followup.send(f"```{chunk}```")
+
+
 @bot.tree.command(name='requirements', description='Get the requirements from all stockpiles')
 async def requirements(inter: discord.Interaction):
+    # TODO: Sort item lists by category, quantity
     try:
         req_dict = db.getRequirements(inter.guild_id)
     except ValueError as e:
