@@ -1,7 +1,7 @@
 import time
 import sqlite3
-import asyncio
 import csv
+import difflib
 
 TSV_HEADER = 'Stockpile Title	Stockpile Name	Structure Type	Quantity	Name	Crated?	Per Crate	Total	Description	CodeName'
 
@@ -48,6 +48,24 @@ class DbHandler():
             'ingredients': item_row[10],
             'description': item_row[11]
         }
+    
+    # Finds the closest matching item display_names to a list of strings
+    def findClosestNames(self, item_names):
+        self.cur.execute("SELECT display_name FROM items")
+        all_names = [row[0] for row in self.cur.fetchall()]
+        matches = {}
+        for name in item_names:
+            fuzzy_match = difflib.get_close_matches(name, all_names, n=1, cutoff=0.6)
+            if fuzzy_match:
+                matches[name] = fuzzy_match[0]
+            else:
+                # Fallback to substring search
+                substring_matches = [item for item in all_names if name.lower() in item.lower()]
+                if substring_matches:
+                    matches[name] = substring_matches[0]
+                else:
+                    matches[name] = None
+        return matches
 
     # Adds a new guild (discord server)
     def addGuild(self, guild_id, name):
@@ -256,25 +274,30 @@ class DbHandler():
 
         # Get item_id for each item
         quota_ids = {}
-        for name, quantity in quotas.items():
+        wrong_names = []
+        for display_name, quantity in quotas.items():
             self.cur.execute("""
                 SELECT id FROM items WHERE display_name = ?
-                """, (name,)
+                """, (display_name,)
             )
             item_id = self.cur.fetchone()
             if item_id:
                 quota_ids[item_id[0]] = quantity
             else:
-                # Search for similar names
-                self.cur.execute("""
-                    SELECT display_name FROM items
-                    WHERE display_name LIKE ?
-                    """, (f'%{name}%',))
-                similar_name = self.cur.fetchone()
-                if similar_name:
-                    raise ValueError(f"Item {name} not found, did you mean {similar_name[0]}?")
+                wrong_names.append(display_name)
+
+        # Return name suggestions if any don't match
+        if wrong_names:
+            similar_names = self.findClosestNames(wrong_names)
+            suggestions = []
+            for name, suggestion in similar_names.items():
+                if suggestion:
+                    suggestions.append(f"{name} -> {suggestion}")
                 else:
-                    raise ValueError(f"Item {name} not found")
+                    suggestions.append(f"{name} -> No match found")
+            raise ValueError("Incorrect item names. Possible matches: \n```{}```".format(
+                '\n'.join(suggestions)
+            ))
         
         # Update quotas, overwrite existing values
         for item_id, quantity in quota_ids.items():
@@ -286,7 +309,6 @@ class DbHandler():
                 """, (stock_id, item_id, quantity, quantity)
             )
         self.conn.commit()
-
 
     # Deletes all quotas set on a stockpile
     def deleteQuotas(self, guild_id, stock_id):
@@ -325,29 +347,33 @@ class DbHandler():
         # Validate item data in the quota string
         quotas = {}
         for q in quota_data.split(', '):
-            name, quantity = q.split(':')
-            quotas[name] = int(quantity)
+            display_name, quantity = q.split(':')
+            quotas[display_name] = int(quantity)
         quota_ids = {}
-        for name, quantity in quotas.items():
+        wrong_names = []
+        for display_name, quantity in quotas.items():
             self.cur.execute("""
                 SELECT id FROM items WHERE display_name = ?
-                """, (name,)
+                """, (display_name,)
             )
             item_id = self.cur.fetchone()
             if item_id:
                 quota_ids[item_id[0]] = quantity
             else:
-                # Search for similar names
-                # TODO: Better search for similar names
-                self.cur.execute("""
-                    SELECT display_name FROM items
-                    WHERE display_name LIKE ?
-                    """, (f'%{name}%',))
-                similar_name = self.cur.fetchone()
-                if similar_name:
-                    raise ValueError(f"Item {name} not found, did you mean {similar_name[0]}?")
+                wrong_names.append(display_name)
+        # Return name suggestions if any don't match
+        if wrong_names:
+            similar_names = self.findClosestNames(wrong_names)
+            suggestions = []
+            for name, suggestion in similar_names.items():
+                if suggestion:
+                    suggestions.append(f"{name} -> {suggestion}")
                 else:
-                    raise ValueError(f"Item {name} not found")
+                    suggestions.append(f"{name} -> No match found")
+            raise ValueError("Incorrect item names. Possible matches: \n```{}```".format(
+                '\n'.join(suggestions)
+            ))
+
         # Add preset to DB
         self.cur.execute(
             "INSERT INTO presets (name, quota_string, guild_id) VALUES (?,?,?)"
@@ -392,7 +418,7 @@ class DbHandler():
             if item_id:
                 quota_ids[item_id[0]] = quantity
             else:
-                raise ValueError(f"Could not find item {name}")
+                raise ValueError(f"Internal error (notify dev): Could not find item {name}")
             
         # Update quotas, add to existing values
         for item_id, quantity in quota_ids.items():
