@@ -137,12 +137,13 @@ async def listQuotas(inter: discord.Interaction, stock_id: int):
     except ValueError as e:
         await inter.response.send_message(str(e), ephemeral=True)
         return
-    quota_set_string = 'Quota set string:\n'+', '.join([f"{q['display_name']}:{q['quantity']}" for q in quota_list])
+    quota_set_string = '```Quota set string:\n'+', '.join([f"{q['display_name']}:{q['quantity']}" for q in quota_list])+'```'
     quota_table = ['```Name                    | Quantity \n------------------------------']
     for q in quota_list:
         quota_table.append(f"{q['display_name']: <23} | {q['quantity']}")
-    quota_string = '\n'.join(quota_table)+'\n\n'+quota_set_string+'```'
+    quota_string = '\n'.join(quota_table)+'```'
     await inter.response.send_message(quota_string)
+    await inter.followup.send(quota_set_string)
 
 
 @bot.tree.command(name='createpreset', description='Create a quota preset')
