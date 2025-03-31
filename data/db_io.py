@@ -26,7 +26,14 @@ class DbHandler():
             raise ValueError("Stockpile not accessible from this guild")
     
     # Takes a row (list) from the items table and returns a dict
-    def _getItemInfoDict(self, item_row):
+    def _getItemInfoDict(self, display_name):
+        self.cur.execute("""
+            SELECT * FROM items WHERE display_name = ?
+            """, (display_name,)
+        )
+        item_row = self.cur.fetchone()
+        if not item_row:
+            raise ValueError(f"Internal Error (notify dev): Item {display_name} not found")
         return {
             'id': item_row[0],
             'code_name': item_row[1],
@@ -305,7 +312,7 @@ class DbHandler():
         if not res:
             raise ValueError('No quotas found')
         
-        return [{'display_name': r[0], 'quantity': r[1]} for r in res]
+        return [{'info': self._getItemInfoDict(r[0]), 'quantity': r[1]} for r in res]
     
     # Adds a quota preset string to the database
     def createPreset(self, guild_id, preset_name, quota_data):
@@ -406,11 +413,11 @@ class DbHandler():
             SELECT name FROM presets WHERE guild_id = ?
             """, (guild_id,)
         )
-        res = self.cur.fetchall()
-        if not res:
+        resp = self.cur.fetchall()
+        if not resp:
             raise ValueError("No presets exist")
         
-        return res[0]
+        return [r[0] for r in resp]
     
     # Fetches all quotas in a preset, returns dict of quotas, dict of item info
     def fetchPresetList(self, guild_id, preset_name):
@@ -431,16 +438,9 @@ class DbHandler():
 
         quota_list = []
         for display_name, quantity in quotas.items():
-            self.cur.execute("""
-                SELECT * FROM items WHERE display_name = ?
-                """, (display_name,)
-            )
-            this_info = self.cur.fetchone()
-            if not this_info:
-                raise ValueError(f"Internal Error (notify dev): Item {display_name} not found")
             quota_list.append({
                 'quantity': quantity,
-                'info': self._getItemInfoDict(this_info)
+                'info': self._getItemInfoDict(display_name)
             })
         
         return quota_list
@@ -480,14 +480,19 @@ class DbHandler():
                 'town': stock_town,
                 'type': stock_struct,
                 'last_update': last_update,
-                'requirements': {}
+                'requirements': []
             }
             for r in reqs:
-                item_name, quota, inv_crates = r
+                display_name, quota, inv_crates = r
                 if inv_crates is None:
-                    req_dict[stock_id]['requirements'][item_name] = quota
+                    required_crates = quota
                 elif inv_crates < quota:
-                    req_dict[stock_id]['requirements'][item_name] = quota - inv_crates
+                    required_crates = quota - inv_crates
+                else: continue
+                req_dict[stock_id]['requirements'].append({
+                    'quantity': required_crates,
+                    'info': self._getItemInfoDict(display_name)
+                })
         
         return req_dict
 

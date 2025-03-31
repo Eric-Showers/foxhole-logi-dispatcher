@@ -159,13 +159,21 @@ async def listQuotas(inter: discord.Interaction, stock_id: int):
     except ValueError as e:
         await inter.response.send_message(str(e), ephemeral=True)
         return
-    quota_set_string = '```Quota set string:\n'+', '.join([f"{q['display_name']}:{q['quantity']}" for q in quota_list])+'```'
-    quota_table = ['```Name                    | Quantity \n------------------------------']
-    for q in quota_list:
-        quota_table.append(f"{q['display_name']: <23} | {q['quantity']}")
-    quota_string = '\n'.join(quota_table)+'```'
-    await inter.response.send_message(quota_string)
-    await inter.followup.send(quota_set_string)
+    # Build table
+    categorized = organizeItemList(quota_list)
+    quota_table = ['Category  |  Quantity  | Item Name\n-----------------------------------']
+    for cat, quotas in categorized.items():
+        quota_table.append(f"{cat: <9} | {quotas[0]['quantity']: <10} | {quotas[0]['display_name']}")
+        for q in quotas[1:]:
+            quota_table.append(f"{'': <9} | {q['quantity']: <10} | {q['display_name']}")
+    resp_str = '\n'.join(quota_table)
+    resp_str += '\n\nQuota set string:\n'+', '.join([f"{q['info']['display_name']}:{q['quantity']}" for q in quota_list])
+    
+    # Handle overflow
+    chunks = chunk_response(resp_str)
+    await inter.response.send_message(f"```{chunks[0]}```")
+    for chunk in chunks[1:]:
+        await inter.followup.send(f"```{chunk}```")
 
 
 @bot.tree.command(name='createpreset', description='Create a quota preset')
@@ -205,7 +213,6 @@ async def listPresets(inter: discord.Interaction):
     except ValueError as e:
         await inter.response.send_message(str(e), ephemeral=True)
         return
-    
     preset_str = '```Preset Names\n-------------\n{}```'.format('\n'.join(preset_list))
     await inter.response.send_message(preset_str)
 
@@ -237,7 +244,6 @@ async def showPreset(inter: discord.Interaction, preset_name: str):
 
 @bot.tree.command(name='requirements', description='Get the requirements from all stockpiles')
 async def requirements(inter: discord.Interaction):
-    # TODO: Sort item lists by category, quantity
     try:
         req_dict = db.getRequirements(inter.guild_id)
     except ValueError as e:
@@ -247,19 +253,23 @@ async def requirements(inter: discord.Interaction):
         await inter.response.send_message('No requirements found', ephemeral=True)
         return
 
-    # Multiple stockpiles could overflow the 2000 char limit
-    resp_str = ''
+    resp_str = 'Category  |  Quantity  | Item Name\n-----------------------------------'
     for stock_id, stock_info in req_dict.items():
-        resp_str += "\n{}, {} {} (ID: {}, last updated: {})\n".format(
+        # Stockpile info header
+        resp_str += "\n\n({}, {} {}, ID: {}, last updated: {})\n".format(
             stock_info['name'],
             stock_info['town'],
             stock_info['type'],
             stock_id,
             get_relative_time_str(stock_info['last_update'])
         )
-        for item, quantity in stock_info['requirements'].items():
-            resp_str += f"\n    {quantity: <5} {item}"
-        resp_str += '\n'
+        categorized = organizeItemList(stock_info['requirements'])
+        reqs_table = []
+        for cat, reqs in categorized.items():
+            reqs_table.append(f"{cat: <9} | {reqs[0]['quantity']: <10} | {reqs[0]['display_name']}")
+            for r in reqs[1:]:
+                reqs_table.append(f"{'': <9} | {r['quantity']: <10} | {r['display_name']}")
+        resp_str += '\n'.join(reqs_table)
     # Handle character limit
     chunks = chunk_response(resp_str)
     await inter.response.send_message(f"```{chunks[0]}```")
