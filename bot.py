@@ -353,10 +353,11 @@ async def showPreset(inter: discord.Interaction, preset_name: str):
         quota_table.append(f"{cat: <10} | {quotas[0]['quantity']: <10} | {quotas[0]['display_name']}")
         for q in quotas[1:]:
             quota_table.append(f"{'': <10} | {q['quantity']: <10} | {q['display_name']}")
-    quota_string = '\n'.join(quota_table)
+    resp_str = '\n'.join(quota_table)
+    resp_str += '\n\nPreset set string:\n'+', '.join([f"{q['info']['display_name']}:{q['quantity']}" for q in quota_list])
 
     # Handle overflow
-    chunks = chunk_response(quota_string)
+    chunks = chunk_response(resp_str)
     await inter.response.send_message(f"```{chunks[0]}```")
     for chunk in chunks[1:]:
         await inter.followup.send(f"```{chunk}```")
