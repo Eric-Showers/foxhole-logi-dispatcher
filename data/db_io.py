@@ -13,17 +13,41 @@ class DbHandler():
     # Checks if a guild is registered with the bot
     def checkRegistration(self, guild_id):
         self.cur.execute("SELECT 1 FROM guilds WHERE id = ?", (guild_id,))
-        if not self.cur.fetchone():
-            raise ValueError("Server not registered with this bot")
+        result = self.cur.fetchone()
+        if not result or result[0] is None:
+            return False
+        else:
+            return True
     
-    # Checks if a stockpile exists for this id
-    def checkStockId(self, guild_id, stock_id):
-        self.cur.execute("SELECT guild_id FROM stockpiles WHERE id = ?", (stock_id,))
-        res = self.cur.fetchone()
-        if not res:
-            raise ValueError("Stockpile not found")
-        if res[0] != guild_id:
-            raise ValueError("Stockpile not accessible from this guild")
+    # Checks if a stockpile exists for this id and is accessible by this guild
+    def checkStockIdAccess(self, guild_id, stock_id):
+        self.cur.execute("SELECT 1 FROM stockpiles WHERE id = ? AND guild_id = ?", (stock_id, guild_id))
+        result = self.cur.fetchone()
+        if not result or result[0] is None:
+            return False
+        else:
+            return True
+        
+    def checkPresetAccess(self, guild_id, preset_name):
+        self.cur.execute("SELECT 1 FROM presets WHERE name = ? AND guild_id = ?", (preset_name, guild_id))
+        result = self.cur.fetchone()
+        if not result or result[0] is None:
+            return False
+        else:
+            return True
+
+    # Given a list of a members roles in the guild, return the highest access level
+    def getAccessLevel(self, guild_id, role_ids):
+        if not role_ids:
+            return 0
+        self.cur.execute("""
+            SELECT MAX(access_level) FROM role_access
+            WHERE guild_id = ? AND role_id IN ({})
+            """.format(','.join('?' * len(role_ids))),
+            (guild_id, *role_ids)
+        )
+        result = self.cur.fetchone()
+        return result[0] if result and result[0] is not None else 0
     
     # Takes a row (list) from the items table and returns a dict
     def _getItemInfoDict(self, display_name):
@@ -69,44 +93,48 @@ class DbHandler():
 
     # Adds a new guild (discord server)
     def addGuild(self, guild_id, name):
-        # Check if guild already exists
-        self.cur.execute("SELECT id FROM guilds WHERE id = ?", (guild_id,))
-        if self.cur.fetchone():
-            raise ValueError(f"Guild {name} is already registered.")
         # Insert the new guild
-        self.cur.execute("INSERT INTO guilds (id, name) VALUES (?, ?)", (guild_id, name))
+        self.cur.execute(
+            "INSERT INTO guilds (id, name) VALUES (?, ?) ON CONFLICT (id) DO NOTHING", 
+            (guild_id, name)
+        )
+        self.conn.commit()
+
+    # Sets the access level of a role associated with this guild
+    def setAccess(self, guild_id, role_id, access_level):
+        self.cur.execute("""
+            INSERT INTO role_access (guild_id, role_id, access_level)
+            VALUES (?,?,?)
+            ON CONFLICT(guild_id, role_id) DO UPDATE SET access_level = EXCLUDED.access_level
+            """, (guild_id, role_id, access_level)
+        )
         self.conn.commit()
 
     # Fetches all stockpiles for a guild
     def fetchStockpiles(self, guild_id):
-        self.checkRegistration(guild_id)
         self.cur.execute("""
-            SELECT id, name, structure_id, last_update FROM stockpiles WHERE guild_id = ?
+            SELECT stock.id, stock.name, stock.last_update, struct.type, t.name 
+            FROM stockpiles stock 
+            JOIN structures struct ON stock.structure_id = struct.id
+            JOIN towns t ON struct.town_id = t.id
+            WHERE stock.guild_id = ?
             """, (guild_id,)
         )
         res = self.cur.fetchall()
         
-        if not res:
-            raise ValueError("No stockpiles exist")
-        
         stockpiles = []
         for r in res:
-            self.cur.execute("SELECT type, town_id FROM structures WHERE id = ?", (r[2],))
-            struct_type, struct_id = self.cur.fetchone()
-            self.cur.execute("SELECT name FROM towns WHERE id = ?", (struct_id,))
-            town = self.cur.fetchone()[0]
             stockpiles.append({
                 'id': r[0],
                 'name': r[1],
-                'town': town,
-                'type': struct_type,
-                'last_update': r[3]
+                'last_update': r[2],
+                'type': r[3],
+                'town': r[4],
             })
         return stockpiles
-    
+
     # Creates a new stockpile
     def create(self, guild_id, town, type, name):
-        self.checkRegistration(guild_id)
         # Get town_id and structure_id
         self.cur.execute("""
             SELECT id FROM towns WHERE name = ?
@@ -134,7 +162,7 @@ class DbHandler():
             """, (guild_id, structure_id, name)
         )
         if self.cur.fetchone():
-            raise ValueError(f"Stockpile {name} already exists in {town}")
+            raise ValueError(f"Stockpile {name} already exists at the {type} in {town}")
         
         # Insert new stockpile
         self.cur.execute("""
@@ -145,36 +173,31 @@ class DbHandler():
         self.conn.commit()
 
     # Deletes a stockpile and it's related inventory and quotas
-    def delete(self, guild_id, stock_id):
-        self.checkRegistration(guild_id)
-        self.checkStockId(guild_id, stock_id)
-        
-        # Delete related inventory and quotas, then stockpile
+    def delete(self, stock_id):
         self.cur.execute("DELETE FROM inventory WHERE stock_id = ?", (stock_id,))
         self.cur.execute("DELETE FROM quotas WHERE stock_id = ?", (stock_id,))
         self.cur.execute("DELETE FROM stockpiles WHERE id = ?", (stock_id,))
         self.conn.commit()
 
     # Updates inventories
-    def updateInventory(self, guild_id, stock_id, tsv_file):
-        self.checkRegistration(guild_id)
-        self.checkStockId(guild_id, stock_id)
-        
+    def updateInventory(self, stock_id, tsv_file):
         # Read TSV file
         reader = csv.reader(tsv_file, delimiter='\t')
         header = next(reader)
         if header != TSV_HEADER.split('\t'):
-            raise ValueError("Invalid TSV file, headers do not match")
+            raise ValueError('Invalid TSV file, headers do not match expected FIR format')
         # Save code_name, name, quantity, crated
         data = [
             {
                 'code_name': r[9], 
                 'display_name': r[4], 
-                'crated': int(r[3]) if r[5] == 'true' else 0, 
-                'non_crated': int(r[3]) if r[5] == 'false' else 0
+                'crated': True if r[5] == 'true' else False, 
+                'amount': int(r[3])
             } 
             for r in reader
         ]
+        if len(data) == 0:
+            raise ValueError('TSV file has no items')
         
         # Get item_id for each item
         for d in data:
@@ -184,29 +207,38 @@ class DbHandler():
             )
             item_id = self.cur.fetchone()
             if not item_id:
-                raise ValueError(f"Item {d['display_name']} not found")
+                raise ValueError(f"Item {d['display_name']} not found (notify dev)")
             else:
                 d['item_id'] = item_id[0]
 
         # Update inventory by deleting previous values, then adding new ones
         self.cur.execute("DELETE FROM inventory WHERE stock_id = ?", (stock_id,))
         for d in data:
-            self.cur.execute("""
-                INSERT INTO inventory (item_id, stock_id, crates, non_crates)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT (item_id, stock_id)
-                DO UPDATE SET crates = ?, non_crates = ?
-                """, (d['item_id'], stock_id, d['crated'], d['non_crated'], d['crated'], d['non_crated'])
-            )
+            if d['crated']:
+                self.cur.execute("""
+                    INSERT INTO inventory (item_id, stock_id, crates)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT (item_id, stock_id)
+                    DO UPDATE SET crates = ?
+                    """,
+                    (d['item_id'], stock_id, d['amount'], d['amount'])
+                )
+            else:
+                self.cur.execute("""
+                    INSERT INTO inventory (item_id, stock_id, non_crates)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT (item_id, stock_id)
+                    DO UPDATE SET non_crates = ?
+                    """,
+                    (d['item_id'], stock_id, d['amount'], d['amount'])
+                )
 
         # Update stockpile timestamp
         self.cur.execute("UPDATE stockpiles SET last_update = ? WHERE id = ?", (int(time.time()),stock_id))
         self.conn.commit()
 
     # Handles a TSV file with multiple stockpiles
-    def updateMulti(self, guild_id, tsv_file):
-        self.checkRegistration(guild_id)
-
+    def updateMulti(self, stock_ids, tsv_file):
         # Read TSV file
         reader = csv.reader(tsv_file, delimiter='\t')
         header = next(reader)
@@ -215,19 +247,25 @@ class DbHandler():
         
         # Save stock_id, code_name, name, quantity, crated
         data = []
-        stock_ids = []
+        file_stock_ids = []
         for r in reader:
             item_data = {
-                'stock_id': r[0].split('.')[0],
+                'stock_id': int(r[0].split('.')[0]),
                 'code_name': r[9], 
                 'display_name': r[4], 
-                'crated': int(r[3]) if r[5] == 'true' else 0, 
-                'non_crated': int(r[3]) if r[5] == 'false' else 0
+                'crated': True if r[5] == 'true' else False, 
+                'amount': int(r[3])
             }
-            if item_data['stock_id'] not in stock_ids:
-                self.checkStockId(guild_id, item_data['stock_id'])
-                stock_ids.append(item_data['stock_id'])
+            if item_data['stock_id'] not in file_stock_ids:
+                if item_data['stock_id'] not in stock_ids:
+                    raise ValueError(f"Stock ID {item_data['stock_id']} read from file but was not listed in command")
+                file_stock_ids.append(item_data['stock_id'])
             data.append(item_data)
+        for id in stock_ids:
+            if id not in file_stock_ids:
+                raise ValueError(f"Stock ID {id} listed in command but not found in file")
+        if len(data) == 0:
+            raise ValueError('TSV files have no items')
 
         # Get item_id for each item
         for d in data:
@@ -237,7 +275,7 @@ class DbHandler():
             )
             item_id = self.cur.fetchone()
             if not item_id:
-                raise ValueError(f"Item {d['display_name']} not found")
+                raise ValueError(f"Item {d['display_name']} not found (notify dev)")
             else:
                 d['item_id'] = item_id[0]
 
@@ -245,27 +283,34 @@ class DbHandler():
         for id in stock_ids:
             self.cur.execute("DELETE FROM inventory WHERE stock_id = ?", (id,))
         for d in data:
-            self.cur.execute("""
-                INSERT INTO inventory (item_id, stock_id, crates, non_crates)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT (item_id, stock_id)
-                DO UPDATE SET crates = ?, non_crates = ?
-                """, (d['item_id'], d['stock_id'], d['crated'], d['non_crated'], d['crated'], d['non_crated'])
-            )
+            if d['crated']:
+                self.cur.execute("""
+                    INSERT INTO inventory (item_id, stock_id, crates)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT (item_id, stock_id)
+                    DO UPDATE SET crates = ?
+                    """,
+                    (d['item_id'], d['stock_id'], d['amount'], d['amount'])
+                )
+            else:
+                self.cur.execute("""
+                    INSERT INTO inventory (item_id, stock_id, non_crates)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT (item_id, stock_id)
+                    DO UPDATE SET non_crates = ?
+                    """,
+                    (d['item_id'], d['stock_id'], d['amount'], d['amount'])
+                )
 
-        # Update stockpile timestamp
+        # Update stockpile timestamps
         for id in stock_ids:
             self.cur.execute("UPDATE stockpiles SET last_update = ? WHERE id = ?", (int(time.time()),id))
         self.conn.commit()
         return stock_ids
 
-        
     # Updates quotas
     # quota_data is a string of the form "display_name:quantity, display_name:quantity, ..."
-    def addQuotas(self, guild_id, stock_id, quota_data):
-        self.checkRegistration(guild_id)
-        self.checkStockId(guild_id, stock_id)
-
+    def addQuotas(self, stock_id, quota_data):
         # Parse quota_data
         quotas = {}
         for q in quota_data.split(', '):
@@ -311,17 +356,12 @@ class DbHandler():
         self.conn.commit()
 
     # Deletes all quotas set on a stockpile
-    def deleteQuotas(self, guild_id, stock_id):
-        self.checkRegistration(guild_id)
-        self.checkStockId(guild_id, stock_id)
+    def deleteQuotas(self, stock_id):
         self.cur.execute("DELETE FROM quotas WHERE stock_id = ?", (stock_id,))
         self.conn.commit()
 
-
     # Fetches the quotas set on a stockpile
-    def fetchQuotas(self, guild_id, stock_id):
-        self.checkRegistration(guild_id)
-        self.checkStockId(guild_id, stock_id)
+    def fetchQuotas(self, stock_id):
         # Get quota data
         self.cur.execute("""
             SELECT i.display_name, q.amount
@@ -332,15 +372,14 @@ class DbHandler():
         )
         res = self.cur.fetchall()
         if not res:
-            raise ValueError('No quotas found')
+            return []
         
         return [{'info': self._getItemInfoDict(r[0]), 'quantity': r[1]} for r in res]
     
     # Adds a quota preset string to the database
     def createPreset(self, guild_id, preset_name, quota_data):
-        self.checkRegistration(guild_id)
         # Check if a preset already exists with this name
-        self.cur.execute("SELECT name FROM presets WHERE name = ?", (preset_name,))
+        self.cur.execute("SELECT name FROM presets WHERE guild_id = ? AND name = ?", (guild_id,preset_name))
         if self.cur.fetchone():
             raise ValueError(f"Preset named {preset_name} already exists")
 
@@ -383,27 +422,17 @@ class DbHandler():
 
     # Deletes a named preset from the database
     def deletePreset(self, guild_id, preset_name):
-        self.checkRegistration(guild_id)
-        # Check if a preset already exists with this name
-        self.cur.execute("SELECT name FROM presets WHERE name = ?", (preset_name,))
-        if not self.cur.fetchone():
-            raise ValueError(f"No preset named {preset_name} exists")
-        self.cur.execute("DELETE FROM presets WHERE name=?", (preset_name,))
+        self.cur.execute("DELETE FROM presets WHERE name = ? AND guild_id = ?", (preset_name, guild_id))
         self.conn.commit()
-
     
     # Adds a preset quota to a stockpile
     def applyPreset(self, guild_id, stock_id, preset_name):
-        self.checkRegistration(guild_id)
-        self.checkStockId(guild_id, stock_id)
         # Parse quota string and get item ids
         self.cur.execute(
-            "SELECT quota_string FROM presets WHERE name = ?",
-            (preset_name,)
+            "SELECT quota_string FROM presets WHERE name = ? AND guild_id = ?",
+            (preset_name, guild_id)
         )
         quota_data = self.cur.fetchone()
-        if not quota_data:
-            raise ValueError(f"No preset named {preset_name} exists")
         quotas = {}
         for q in quota_data[0].split(', '):
             name, quantity = q.split(':')
@@ -433,7 +462,6 @@ class DbHandler():
 
     # Fetches all presets for a guild
     def fetchPresets(self, guild_id):
-        self.checkRegistration(guild_id)
         # Get all presets for this guild
         self.cur.execute("""
             SELECT name FROM presets WHERE guild_id = ?
@@ -441,21 +469,17 @@ class DbHandler():
         )
         resp = self.cur.fetchall()
         if not resp:
-            raise ValueError("No presets exist")
-        
+            return []
         return [r[0] for r in resp]
     
     # Fetches all quotas in a preset, returns dict of quotas, dict of item info
     def fetchPresetList(self, guild_id, preset_name):
-        self.checkRegistration(guild_id)
-        # Get quota data
+        # Get quota string
         self.cur.execute("""
-            SELECT quota_string FROM presets WHERE name = ?
-            """, (preset_name,)
+            SELECT quota_string FROM presets WHERE name = ? AND guild_id = ?
+            """, (preset_name, guild_id)
         )
         res = self.cur.fetchone()
-        if not res:
-            raise ValueError("No preset with name {preset_name} found")
         # Parse quota string
         quotas = {}
         for q in res[0].split(', '):
@@ -471,54 +495,56 @@ class DbHandler():
         
         return quota_list
 
-    # Fetches the requirements to meet quotas for all stockpiles
-    def getRequirements(self, guild_id):
-        self.checkRegistration(guild_id)
-        # Get stockpile id, name, town, and structure type for this guild
+    # Fetches the requirements to meet quotas for a stockpile
+    def getRequirements(self, stock_id):
+        # Get stockpile info
         self.cur.execute("""
-            SELECT s.id, s.name, s.last_update, t.name, st.type
-            FROM stockpiles s
-            JOIN structures st ON s.structure_id = st.id
-            JOIN towns t ON st.town_id = t.id
-            WHERE s.guild_id = ?
-            """, (guild_id,)
+            SELECT stock.name, stock.last_update, town.name, struc.type
+            FROM stockpiles stock
+            JOIN structures struc ON stock.structure_id = struc.id
+            JOIN towns town ON struc.town_id = town.id
+            WHERE stock.id = ?
+            """, (stock_id,)
         )
-        res = self.cur.fetchall()
-        if not res:
-            raise ValueError("No stockpiles exist")
-        
-        req_dict = {}
-        for stockpile_info in res:
-            stock_id, stock_name, last_update, stock_town, stock_struct = stockpile_info
-            self.cur.execute("""
-                SELECT i.display_name, q.amount, inv.crates
-                FROM quotas q
-                JOIN items i ON q.item_id = i.id
-                LEFT JOIN inventory inv ON q.item_id = inv.item_id AND q.stock_id = inv.stock_id
-                WHERE q.stock_id = ?
-                """, (stock_id,)
-            )
-            reqs = self.cur.fetchall()
-            if not reqs:
-                continue
-            req_dict[stock_id] = {
-                'name': stock_name,
-                'town': stock_town,
-                'type': stock_struct,
-                'last_update': last_update,
-                'requirements': []
-            }
-            for r in reqs:
-                display_name, quota, inv_crates = r
-                if inv_crates is None:
-                    required_crates = quota
-                elif inv_crates < quota:
-                    required_crates = quota - inv_crates
-                else: continue
-                req_dict[stock_id]['requirements'].append({
-                    'quantity': required_crates,
-                    'info': self._getItemInfoDict(display_name)
-                })
+        stock_name, last_update, stock_town, stock_struct = self.cur.fetchall()[0]
+        req_dict = {
+            'name': stock_name,
+            'last_update': last_update,
+            'town': stock_town,
+            'type': stock_struct,
+            'requirements': []
+        }
+
+        # Get item quotas and inventories
+        self.cur.execute("""
+            SELECT item.display_name, quota.amount, inv.crates, inv.non_crates
+            FROM quotas quota
+            JOIN items item ON quota.item_id = item.id
+            LEFT JOIN inventory inv ON quota.item_id = inv.item_id AND quota.stock_id = inv.stock_id
+            WHERE quota.stock_id = ?
+            """, (stock_id,)
+        )
+        reqs = self.cur.fetchall()
+        if not reqs:
+            return {}
+
+        # Get item info and calculate required amounts to meet quotas
+        for r in reqs:
+            display_name, quota_amount, inv_crates, inv_non_crates = r
+            # Missing items can be treated as inventory of 0
+            inv_crates = 0 if inv_crates is None else inv_crates
+            inv_non_crates = 0 if inv_non_crates is None else inv_non_crates
+            item_info = self._getItemInfoDict(display_name)
+            if 'VehicleProfileType' in item_info['category'] or item_info['category'] == 'Structures':
+                required_amount = quota_amount - (inv_crates * item_info['per_crate'] + inv_non_crates)
+            else:
+                required_amount = quota_amount - inv_crates
+            if required_amount < 1:
+                continue    # Ignore quotas that are already satisfied
+            req_dict['requirements'].append({
+                'quantity': required_amount,
+                'info': item_info
+            })
         
         return req_dict
 

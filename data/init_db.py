@@ -95,8 +95,18 @@ def getItems():
             category = ''
             if 'ItemCategory' in item:
                 category = item['ItemCategory']
+                per_crate = item.get('ItemDynamicData', {}).get('QuantityPerCrate', '')
             elif 'VehicleProfileType' in item:
+                # Per crate quantities not provided in catalog.json
+                # Not all vehicles are crate-able, but this will have to do
                 category = item['VehicleProfileType']
+                per_crate = 3
+            elif 'ProductionCategories' in item and item['ProductionCategories']['MassProductionFactory'] == 'EFactoryQueueType::Structures':
+                category = 'Structures'
+                per_crate = 3
+            else:
+                category = ''
+                per_crate = ''
 
             ingredients = item.get('ItemDynamicData', {}).get('CostPerCrate', [])
             if ingredients != []:
@@ -108,7 +118,7 @@ def getItems():
                 item.get('CodeName', ''),
                 item.get('DisplayName', ''),
                 category,
-                item.get('ItemDynamicData', {}).get('QuantityPerCrate', ''),
+                per_crate,
                 item.get('ProductionCategories', {}).get('Factory', ''),
                 item.get('ProductionCategories', {}).get('MassProductionFactory', ''),
                 item.get('FactionVariant', ''),
@@ -131,6 +141,14 @@ def init_db_tables(db_path):
     CREATE TABLE IF NOT EXISTS guilds (
         id INTEGER PRIMARY KEY,
         name TEXT NOT NULL
+    );
+                         
+    CREATE TABLE IF NOT EXISTS role_access (
+        guild_id BIGINT NOT NULL,
+        role_id BIGINT NOT NULL,
+        access_level INT NOT NULL CHECK (access_level IN (1, 2)),
+        PRIMARY KEY (guild_id, role_id),
+        FOREIGN KEY (guild_id) REFERENCES guilds(id) ON DELETE CASCADE
     );
 
     CREATE TABLE IF NOT EXISTS towns (
@@ -200,9 +218,10 @@ def init_db_tables(db_path):
     );
                          
     CREATE TABLE IF NOT EXISTS presets (
-        name TEXT NOT NULL PRIMARY KEY,
+        name TEXT NOT NULL,
         quota_string TEXT NOT NULL,
         guild_id INTEGER NOT NULL,
+        PRIMARY KEY (name, guild_id),
         FOREIGN KEY (guild_id) REFERENCES guilds(id)
     );
     """)
