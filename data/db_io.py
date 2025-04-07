@@ -18,7 +18,7 @@ class DbHandler():
             return False
         else:
             return True
-    
+
     # Checks if a stockpile exists for this id and is accessible by this guild
     def checkStockIdAccess(self, guild_id, stock_id):
         self.cur.execute("SELECT 1 FROM stockpiles WHERE id = ? AND guild_id = ?", (stock_id, guild_id))
@@ -27,7 +27,7 @@ class DbHandler():
             return False
         else:
             return True
-        
+
     def checkPresetAccess(self, guild_id, preset_name):
         self.cur.execute("SELECT 1 FROM presets WHERE name = ? AND guild_id = ?", (preset_name, guild_id))
         result = self.cur.fetchone()
@@ -48,7 +48,7 @@ class DbHandler():
         )
         result = self.cur.fetchone()
         return result[0] if result and result[0] is not None else 0
-    
+
     # Takes a row (list) from the items table and returns a dict
     def _getItemInfoDict(self, display_name):
         self.cur.execute("""

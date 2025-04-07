@@ -1,0 +1,155 @@
+import discord
+from discord import app_commands
+from discord.ext import commands
+import asyncio
+
+import utils.checks as checks
+import utils.helpers as helpers
+
+
+class Stock(commands.GroupCog, name='stock'):
+    def __init__(self, bot, db):
+        self.bot = bot
+        self.db = db
+
+    @app_commands.command(name='list', description='List all stockpiles registered on the discord server')
+    async def list(self, inter: discord.Interaction):
+        try:
+            checks.checkRegistration(self.db, inter.guild_id)
+            checks.checkAccessLevel(self.db, inter, 1)
+        except discord.app_commands.CheckFailure as e:
+            await inter.response.send_message(str(e), ephemeral=True)
+            return
+        
+        stockpiles = self.db.fetchStockpiles(inter.guild_id)
+        if not stockpiles:
+            await inter.response.send_message('No stockpiles found', ephemeral=True)
+            return
+        stock_str = '```Stock ID |     Name     |        Town        |     Type     |   Last Updated\n--------------------------------------------------'
+        for stock in stockpiles:
+            stock_str += "\n{: <8} | {: <12} | {: <18} | {: <12} | {}".format(
+                stock['id'],
+                stock['name'],
+                stock['town'],
+                stock['type'],
+                helpers.get_relative_time_str(stock['last_update'])
+            )
+        stock_str += '```'
+        await inter.response.send_message(stock_str)
+
+
+    @app_commands.command(name='create', description='Add a new stockpile in the bot')
+    @app_commands.describe(
+        town='Town that the stockpile is in (nearest major label)', 
+        type='Seaport or Storage Depot',
+        name='In-game name of the stockpile'
+    )
+    async def create(self, inter: discord.Interaction, town: str, type: str, name: str):
+        try:
+            checks.checkRegistration(self.db, inter.guild_id)
+            checks.checkAccessLevel(self.db, inter, 1)
+        except discord.app_commands.CheckFailure as e:
+            await inter.response.send_message(str(e), ephemeral=True)
+            return
+        try:
+            self.db.create(inter.guild_id, town, type, name)
+        except ValueError as e:
+            await inter.response.send_message(str(e), ephemeral=True)
+            return
+        await inter.response.send_message(f"Created stockpile named {name} at the {type} in {town}")
+
+    @app_commands.command(name='delete', description='Delete a stockpile from the bot')
+    @app_commands.describe(stock_id='Stock ID to delete')
+    async def delete(self, inter: discord.Interaction, stock_id: int):
+        try:
+            checks.checkRegistration(self.db, inter.guild_id)
+            checks.checkAccessLevel(self.db, inter, 2)
+            checks.checkStockId(self.db, inter, stock_id)
+        except discord.app_commands.CheckFailure as e:
+            await inter.response.send_message(str(e), ephemeral=True)
+            return
+        self.db.delete(stock_id)
+        await inter.response.send_message(f"Deleted stockpile with ID {stock_id}")
+
+    @app_commands.command(name='update', description='Update the inventory of a stockpile using a TSV file')
+    @app_commands.describe(stock_id='Stock ID to update')
+    async def update(self, inter: discord.Interaction, stock_id: int):
+        try:
+            checks.checkRegistration(self.db, inter.guild_id)
+            checks.checkAccessLevel(self.db, inter, 2)
+            checks.checkStockId(self.db, inter, stock_id)
+        except discord.app_commands.CheckFailure as e:
+            await inter.response.send_message(str(e), ephemeral=True)
+            return
+        # Prompt user for TSV file
+        await inter.response.send_message("Please reply with your TSV file.")
+        def check(msg):
+            return (
+                msg.author == inter.user 
+                and msg.channel == inter.channel
+                and msg.attachments
+            )
+        try:
+            msg = await self.bot.wait_for("message", check=check, timeout=60)  # Wait for 60s
+        except asyncio.TimeoutError:
+            await inter.followup.send("File upload timed out.", ephemeral=True)
+            return
+
+        # Ingest TSV file
+        attachment = msg.attachments[0]
+        if 'text/tab-separated-values' not in attachment.content_type:
+            await inter.followup.send('Error: File must be a TSV, not {}'.format(attachment.content_type), ephemeral=True)
+            return
+        tsvFile = await attachment.read()
+        tsvFile = tsvFile.decode('utf-8').splitlines()
+        try:
+            self.db.updateInventory(stock_id, tsvFile)
+        except ValueError as e:
+            await inter.followup.send(str(e), ephemeral=True)
+            return
+        await inter.followup.send('Updated stockpile with ID {}'.format(stock_id))
+
+
+    @app_commands.command(name='updatemulti', description='Update the inventory of multiple stockpiles using a TSV file')
+    @app_commands.describe(stock_ids='1, 3, 4, ...')
+    async def updateMulti(self, inter: discord.Interaction, stock_ids: str):
+        stock_ids = [int(id.strip()) for id in stock_ids.split(',')]
+        try:
+            checks.checkRegistration(self.db, inter.guild_id)
+            checks.checkAccessLevel(self.db, inter, 2)
+            for id in stock_ids:
+                checks.checkStockId(self.db, inter, id)
+        except discord.app_commands.CheckFailure as e:
+            await inter.response.send_message(str(e), ephemeral=True)
+            return
+        # Prompt user for TSV file
+        await inter.response.send_message("Please reply with your TSV file.")
+        def check(msg):
+            return (
+                msg.author == inter.user 
+                and msg.channel == inter.channel
+                and msg.attachments
+            )
+        try:
+            msg = await self.bot.wait_for("message", check=check, timeout=60)  # Wait for 60s
+        except asyncio.TimeoutError:
+            await inter.followup.send("File upload timed out.", ephemeral=True)
+            return
+
+        # Ingest TSV file
+        attachment = msg.attachments[0]
+        if 'text/tab-separated-values' not in attachment.content_type:
+            await inter.followup.send('Error: File must be a TSV, not {}'.format(attachment.content_type), ephemeral=True)
+            return
+        tsvFile = await attachment.read()
+        tsvFile = tsvFile.decode('utf-8').splitlines()
+        try:
+            stock_ids = self.db.updateMulti(stock_ids, tsvFile)
+        except ValueError as e:
+            await inter.followup.send(str(e), ephemeral=True)
+            return
+        await inter.followup.send(f"Updated stockpiles with IDs {stock_ids}")
+
+
+async def setup(bot):
+    await bot.add_cog(Stock(bot, bot.db))
