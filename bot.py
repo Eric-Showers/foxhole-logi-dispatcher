@@ -1,10 +1,8 @@
 import os
-import time
+import sys
 
 import discord
-import asyncio
 from discord.ext import commands
-from discord import app_commands
 from dotenv import load_dotenv
 
 from data.db_io import DbHandler
@@ -18,7 +16,10 @@ intents.message_content = True
 bot = commands.Bot(command_prefix='/', intents=intents)
 
 bot.db = DbHandler(os.getenv('DB_PATH'))
-sync_commands = True
+if len(sys.argv) > 1 and sys.argv[1] == '--sync':
+    sync_commands = True
+else:
+    sync_commands = False
 
 
 @bot.event
