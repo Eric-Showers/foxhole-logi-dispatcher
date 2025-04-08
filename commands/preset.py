@@ -80,7 +80,7 @@ class Preset(commands.GroupCog, name='preset'):
         preset_str = '```Preset Names\n-------------\n{}```'.format('\n'.join(preset_list))
         await inter.response.send_message(preset_str)
 
-    @app_commands.command(name='show', description='Show the contents of a preset')
+    @app_commands.command(name='view', description='View the contents of a preset')
     @app_commands.describe(preset_name='Name of the preset')
     async def showPreset(self, inter: discord.Interaction, preset_name: str):
         try:
