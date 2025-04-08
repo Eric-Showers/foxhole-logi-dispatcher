@@ -204,6 +204,66 @@ class DbHandler():
                     'info': item_info
                 })
         return item_list
+    
+    def setInventory(self, stock_id, crates_list, non_crates_list):
+        # Parse item list
+        item_amounts = {}
+        for i in crates_list.split(','):
+            name, amount = i.strip().split(':')
+            if name not in item_amounts:
+                item_amounts[name] = {'crates':0, 'non_crates':None}
+            item_amounts[name]['crates'] = int(amount)
+        for i in non_crates_list.split(','):
+            name, amount = i.strip().split(':')
+            if name not in item_amounts:
+                item_amounts[name] = {'crates':None, 'non_crates':0}
+            item_amounts[name]['non_crates'] = int(amount)
+        
+        # Get item_id for each item
+        wrong_names = []
+        for display_name in item_amounts:
+            self.cur.execute("""
+                SELECT id FROM items WHERE display_name = ?
+                """, (display_name,)
+            )
+            item_id = self.cur.fetchone()
+            if item_id:
+                item_amounts[display_name]['id'] = item_id[0]
+            else:
+                wrong_names.append(display_name)
+
+        # Return name suggestions if any don't match
+        if wrong_names:
+            similar_names = self.findClosestNames(wrong_names)
+            suggestions = []
+            for name, suggestion in similar_names.items():
+                if suggestion:
+                    suggestions.append(f"{name} -> {suggestion}")
+                else:
+                    suggestions.append(f"{name} -> No match found")
+            raise ValueError("Incorrect item names. Possible matches: \n```{}```".format(
+                '\n'.join(suggestions)
+            ))
+
+        # Update inventory rows, overwrite existing values
+        for item_dict in item_amounts.values():
+            if item_dict['crates'] is not None:
+                self.cur.execute("""
+                    INSERT INTO inventory (stock_id, item_id, crates)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT (stock_id, item_id)
+                    DO UPDATE SET crates = ?
+                    """, (stock_id, item_dict['id'], item_dict['crates'], item_dict['crates'])
+                )
+            if item_dict['non_crates'] is not None:
+                self.cur.execute("""
+                    INSERT INTO inventory (stock_id, item_id, non_crates)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT (stock_id, item_id)
+                    DO UPDATE SET non_crates = ?
+                    """, (stock_id, item_dict['id'], item_dict['non_crates'], item_dict['non_crates'])
+                )
+        self.conn.commit()
 
     # Updates inventories
     def updateInventory(self, stock_id, tsv_file):

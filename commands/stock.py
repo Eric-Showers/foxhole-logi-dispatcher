@@ -96,6 +96,31 @@ class Stock(commands.GroupCog, name='stock'):
         for chunk in chunks[1:]:
             await inter.followup.send(f"```{chunk}```")
 
+    @app_commands.command(name='set', description='Set the inventory of a stockpile using a list of item amounts')
+    @app_commands.describe(
+        stock_id='Stock ID to update', 
+        crates_list='name:amount, name:amount, ... (name must match in-game name)',
+        non_crates_list='name:amount, name:amount, ... (only use for vehicles/structures)'
+    )
+    async def set(self, inter: discord.Interaction, stock_id: int, crates_list: str='', non_crates_list: str=''):
+        try:
+            checks.checkRegistration(self.db, inter.guild_id)
+            checks.checkAccessLevel(self.db, inter, 2)
+            checks.checkStockId(self.db, inter, stock_id)
+        except discord.app_commands.CheckFailure as e:
+            await inter.response.send_message(str(e), ephemeral=True)
+            return
+        if crates_list == '' and non_crates_list == '':
+            await inter.response.send_message('crates_list and non_crates_list cannot both be empty', ephemeral=True)
+            return
+        try:
+            self.db.setInventory(stock_id, crates_list, non_crates_list)
+        except ValueError as e:
+            await inter.response.send_message(str(e), ephemeral=True)
+            return
+        await inter.response.send_message(f"Stock ID {stock_id} inventory has been updated")
+
+
     @app_commands.command(name='update', description='Update the inventory of a stockpile using a screenshot')
     @app_commands.describe(stock_id='Stock ID to update')
     async def update(self, inter: discord.Interaction, stock_id: int):
