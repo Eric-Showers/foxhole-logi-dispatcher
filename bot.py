@@ -46,8 +46,8 @@ async def register(inter: discord.Interaction):
 @bot.tree.command(name='setaccess', description='Set access level of a role on this server (1: User, 2: Admin)')
 async def setAccess(inter: discord.Interaction, role: discord.Role, access_level: int):
     try:
-        checks.checkRegistration(inter.guild_id)
-        checks.checkAccessLevel(inter, 2)
+        checks.checkRegistration(bot.db, inter.guild_id)
+        checks.checkAccessLevel(bot.db, inter, 2)
     except discord.app_commands.CheckFailure as e:
         await inter.response.send_message(str(e), ephemeral=True)
         return
@@ -58,9 +58,9 @@ async def setAccess(inter: discord.Interaction, role: discord.Role, access_level
 @bot.tree.command(name='requirements', description='Get the required crates to meet quotas on a stockpile')
 async def requirements(inter: discord.Interaction, stock_id: int):
     try:
-        checks.checkRegistration(inter.guild_id)
-        checks.checkAccessLevel(inter, 1)
-        checks.checkStockId(inter, stock_id)
+        checks.checkRegistration(bot.db, inter.guild_id)
+        checks.checkAccessLevel(bot.db, inter, 1)
+        checks.checkStockId(bot.db, inter, stock_id)
     except discord.app_commands.CheckFailure as e:
         await inter.response.send_message(str(e), ephemeral=True)
         return
