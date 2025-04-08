@@ -71,7 +71,32 @@ class Stock(commands.GroupCog, name='stock'):
         self.db.delete(stock_id)
         await inter.response.send_message(f"Deleted stockpile with ID {stock_id}")
 
-    @app_commands.command(name='update', description='Update the inventory of a stockpile using a TSV file')
+    @app_commands.command(name='view', description='View the contents of a stockpile')
+    @app_commands.describe(stock_id='Stock ID to view')
+    async def view(self, inter: discord.Interaction, stock_id: int):
+        try:
+            checks.checkRegistration(self.db, inter.guild_id)
+            checks.checkAccessLevel(self.db, inter, 2)
+            checks.checkStockId(self.db, inter, stock_id)
+        except discord.app_commands.CheckFailure as e:
+            await inter.response.send_message(str(e), ephemeral=True)
+            return
+        item_list = self.db.viewInventory(stock_id)
+        categorized = helpers.organizeItemList(item_list)
+        # Build response table
+        inv_table = ['Category   | Quantity | Item Name\n-----------------------------------']
+        for cat, cat_items in categorized.items():
+            inv_table.append(f"{cat: <10} | {cat_items[0]['quantity']: <8} | {cat_items[0]['display_name']}")
+            for item in cat_items[1:]:
+                inv_table.append(f"{'': <10} | {item['quantity']: <8} | {item['display_name']}")
+        resp_str = '\n'.join(inv_table)
+        # Handle character limit
+        chunks = helpers.chunk_response(resp_str)
+        await inter.response.send_message(f"```{chunks[0]}```")
+        for chunk in chunks[1:]:
+            await inter.followup.send(f"```{chunk}```")
+
+    @app_commands.command(name='update', description='Update the inventory of a stockpile using a screenshot')
     @app_commands.describe(stock_id='Stock ID to update')
     async def update(self, inter: discord.Interaction, stock_id: int):
         try:
@@ -81,8 +106,9 @@ class Stock(commands.GroupCog, name='stock'):
         except discord.app_commands.CheckFailure as e:
             await inter.response.send_message(str(e), ephemeral=True)
             return
-        # Prompt user for TSV file
-        await inter.response.send_message("Please reply with your TSV file.")
+        
+        # Prompt user for screenshot
+        await inter.response.send_message("Please reply with your screenshot.")
         def check(msg):
             return (
                 msg.author == inter.user 
@@ -95,20 +121,29 @@ class Stock(commands.GroupCog, name='stock'):
             await inter.followup.send("File upload timed out.", ephemeral=True)
             return
 
-        # Ingest TSV file
+        # Ingest screenshot
         attachment = msg.attachments[0]
-        if 'text/tab-separated-values' not in attachment.content_type:
-            await inter.followup.send('Error: File must be a TSV, not {}'.format(attachment.content_type), ephemeral=True)
+        media, file_type = attachment.content_type.split('/')
+        if 'image' not in media:
+            await inter.followup.send(f"Error: File must be an image, not {attachment.content_type}", ephemeral=True)
             return
-        tsvFile = await attachment.read()
-        tsvFile = tsvFile.decode('utf-8').splitlines()
+        screenshot = await attachment.read()
+        temp_path = f"temp/{inter.id}.{file_type}"
+        with open(temp_path, 'xb') as outfile:
+            outfile.write(screenshot)
+        # Send screenshot to FIR to parse into TSV
         try:
-            self.db.updateInventory(stock_id, tsvFile)
+            tsv_data = await helpers.run_fir_parser(temp_path)
+        except asyncio.TimeoutError as e:
+            await inter.followup.send(str(e), ephemeral=True)
+            return
+        # Update DB
+        try:
+            self.db.updateInventory(stock_id, tsv_data.splitlines())
         except ValueError as e:
             await inter.followup.send(str(e), ephemeral=True)
             return
         await inter.followup.send('Updated stockpile with ID {}'.format(stock_id))
-
 
     @app_commands.command(name='updatemulti', description='Update the inventory of multiple stockpiles using a TSV file')
     @app_commands.describe(stock_ids='1, 3, 4, ...')

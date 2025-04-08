@@ -179,6 +179,32 @@ class DbHandler():
         self.cur.execute("DELETE FROM stockpiles WHERE id = ?", (stock_id,))
         self.conn.commit()
 
+    # Fetches the inventory of a stockpile
+    def viewInventory(self, stock_id):
+        self.cur.execute("""
+            SELECT ite.display_name, inv.crates, inv.non_crates
+            FROM inventory inv
+            JOIN items ite
+            ON inv.item_id = ite.id
+            WHERE inv.stock_id = ?""",
+            (stock_id,))
+        result = self.cur.fetchall()
+        if not result:
+            return []
+        item_list = []
+        for item in result:
+            display_name, crates, non_crates = item
+            item_info = self._getItemInfoDict(display_name)
+            if non_crates != 0:
+                quantity = crates * item_info['per_crate'] + non_crates
+            else:
+                quantity = crates
+                item_list.append({
+                    'quantity': quantity,
+                    'info': item_info
+                })
+        return item_list
+
     # Updates inventories
     def updateInventory(self, stock_id, tsv_file):
         # Read TSV file

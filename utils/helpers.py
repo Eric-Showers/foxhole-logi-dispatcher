@@ -1,4 +1,8 @@
 import time
+import asyncio
+import os
+
+from playwright.async_api import async_playwright
 
 # Converts a timestamp to a relative time string (eg. "6 hours ago")
 def get_relative_time_str(prev_time):
@@ -53,3 +57,42 @@ def organizeItemList(item_list):
     for cat, quotas in categorized.items():
         categorized[cat] = sorted(quotas, key=lambda x: x['quantity'], reverse=True)
     return categorized
+
+
+# TBH I vibe coded this one because it's hopefully a temporary hack :|
+async def run_fir_parser(image_path: str) -> str:
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        context = await browser.new_context(accept_downloads=True)
+        page = await context.new_page()
+        await page.goto("http://0.0.0.0:8000/")
+
+        # Upload the screenshot
+        file_input = await page.wait_for_selector('input[type="file"]')
+        await file_input.set_input_files(image_path)
+
+        # More robust selector
+        status_selector = 'li:has-text("Wait for processing") div span'
+
+        for i in range(60):  # Wait up to 30s
+            processed_text = await page.eval_on_selector(
+                status_selector, "el => el.innerText"
+            )
+            if processed_text.strip().startswith("1 of"):
+                break
+            await asyncio.sleep(0.5)
+        else:
+            raise asyncio.TimeoutError('FIR took too long to process')
+
+        async with page.expect_download() as download_info:
+            await page.click("button.tsv")
+        download = await download_info.value
+
+        tsv_path = await download.path()
+
+        with open(tsv_path, "r", encoding="utf-8") as f:
+            tsv_data = f.read()
+
+        await browser.close()
+        os.remove(image_path)
+        return tsv_data
