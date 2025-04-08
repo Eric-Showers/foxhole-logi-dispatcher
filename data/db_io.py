@@ -199,10 +199,10 @@ class DbHandler():
                 quantity = crates * item_info['per_crate'] + non_crates
             else:
                 quantity = crates
-                item_list.append({
-                    'quantity': quantity,
-                    'info': item_info
-                })
+            item_list.append({
+                'quantity': quantity,
+                'info': item_info
+            })
         return item_list
     
     def setInventory(self, stock_id, crates_list, non_crates_list):
@@ -247,6 +247,7 @@ class DbHandler():
 
         # Update inventory rows, overwrite existing values
         for item_dict in item_amounts.values():
+            print(item_dict)
             if item_dict['crates'] is not None:
                 self.cur.execute("""
                     INSERT INTO inventory (stock_id, item_id, crates)
