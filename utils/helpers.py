@@ -65,7 +65,7 @@ async def run_fir_parser(image_path: str) -> str:
         browser = await p.chromium.launch()
         context = await browser.new_context(accept_downloads=True)
         page = await context.new_page()
-        await page.goto("http://0.0.0.0:8000/")
+        await page.goto("http://127.0.0.1:8800/")
 
         # Upload the screenshot
         file_input = await page.wait_for_selector('input[type="file"]')
