@@ -33,6 +33,7 @@ async def on_ready():
 
 async def setup_hook():
     for file in os.listdir("./commands"):
+        #stock.py, preset.py, quota.py
         if file.endswith(".py"):
             await bot.load_extension(f"commands.{file[:-3]}")
 
