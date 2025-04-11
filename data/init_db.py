@@ -92,21 +92,26 @@ def getItems():
         writer.writerow(headers)
 
         for item in catalog:
-            category = ''
             if 'ItemCategory' in item:
-                category = item['ItemCategory']
+                category = item['ItemCategory'].split('::')[1]
                 per_crate = item.get('ItemDynamicData', {}).get('QuantityPerCrate', '')
             elif 'VehicleProfileType' in item:
+                category = 'Vehicles'
                 # Per crate quantities not provided in catalog.json
                 # Not all vehicles are crate-able, but this will have to do
-                category = item['VehicleProfileType']
                 per_crate = 3
-            elif 'ProductionCategories' in item and item['ProductionCategories']['MassProductionFactory'] == 'EFactoryQueueType::Structures':
+            elif ('ProductionCategories' in item 
+                  and item['ProductionCategories']['MassProductionFactory'] == 'EFactoryQueueType::Structures'):
                 category = 'Structures'
+                # Same situation as vehicles
                 per_crate = 3
             else:
-                category = ''
+                category = 'Other'
                 per_crate = ''
+
+            faction = ''
+            if 'FactionVariant' in item:
+                faction = item['FactionVariant'].split('::')[1]
 
             ingredients = item.get('ItemDynamicData', {}).get('CostPerCrate', [])
             if ingredients != []:
@@ -114,16 +119,28 @@ def getItems():
             else:
                 ingredients = ''
 
+            factory_q = ''
+            mpf_q = ''
+            if 'ProductionCategories' in item:
+                if 'Factory' in item['ProductionCategories']:
+                    factory_q = item['ProductionCategories']['Factory'].split('::')[1]
+                if 'MassProductionFactory' in item['ProductionCategories']:
+                    mpf_q = item['ProductionCategories']['MassProductionFactory'].split('::')[1]
+
+            shippable_type = ''
+            if 'ShippableInfo' in item:
+                shippable_type = item['ShippableInfo'].split('::')[1]
+
             row = [
                 item.get('CodeName', ''),
                 item.get('DisplayName', ''),
                 category,
                 per_crate,
-                item.get('ProductionCategories', {}).get('Factory', ''),
-                item.get('ProductionCategories', {}).get('MassProductionFactory', ''),
-                item.get('FactionVariant', ''),
+                factory_q,
+                mpf_q,
+                faction,
                 item.get('ItemProfileData', {}).get('ReserveStockpileMaxQuantity', ''),
-                item.get('ShippableInfo', ''),
+                shippable_type,
                 ingredients,
                 item.get('Description', '')
             ]
