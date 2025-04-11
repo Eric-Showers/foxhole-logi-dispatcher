@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 from data.db_io import DbHandler
 import utils.checks as checks
 import utils.helpers as helpers
+from views.items import FactionSelectView
 
 load_dotenv()
 
@@ -90,6 +91,15 @@ async def requirements(inter: discord.Interaction, stock_id: int):
     await inter.response.send_message(f"```{chunks[0]}```")
     for chunk in chunks[1:]:
         await inter.followup.send(f"```{chunk}```")
+
+
+@bot.tree.command(name='items')
+async def counter(inter: discord.Interaction):
+    await inter.response.send_message(
+        "Select a faction to begin browsing items:",
+        view=FactionSelectView(bot.db),
+        ephemeral=True
+    )
 
 
 bot.setup_hook = setup_hook

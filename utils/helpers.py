@@ -41,15 +41,7 @@ def organizeItemList(item_list):
     # Sort quotas into categories
     categorized = {}
     for item in item_list:
-        db_category = item['info']['category'].split('::')
-        if db_category[0] == 'EItemCategory':
-            category = db_category[1]
-        elif db_category[0] == 'EVehicleProfileType':
-            category = 'Vehicle'
-        elif db_category[0] == 'Structures':
-            category = db_category[0]
-        else:
-            category = 'Other'
+        category = item['info']['category']
         if category not in categorized:
             categorized[category] = []
         categorized[category].append({'display_name': item['info']['display_name'], 'quantity': item['quantity']})

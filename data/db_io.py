@@ -3,6 +3,8 @@ import sqlite3
 import csv
 import difflib
 
+from data.objects.item import Item
+
 TSV_HEADER = 'Stockpile Title	Stockpile Name	Structure Type	Quantity	Name	Crated?	Per Crate	Total	Description	CodeName'
 
 class DbHandler():
@@ -72,6 +74,22 @@ class DbHandler():
             'ingredients': item_row[10],
             'description': item_row[11]
         }
+    
+    # Fetches all item categories
+    def getCategories(self):
+        self.cur.execute("SELECT DISTINCT category FROM items")
+        return [category[0] for category in self.cur.fetchall()]
+
+    # Fetches all items with matching category string
+    def getCategoryItems(self, category, faction):
+        if not faction:
+            self.cur.execute("SELECT * from items WHERE category = ?", (category,))
+        elif faction == 'Wardens':
+            self.cur.execute("SELECT * from items WHERE category = ? AND faction != 'Colonials'", (category,))
+        elif faction == 'Colonials':
+            self.cur.execute("SELECT * from items WHERE category = ? AND faction != 'Wardens'", (category,))
+            
+        return [Item(row) for row in self.cur.fetchall()]
     
     # Finds the closest matching item display_names to a list of strings
     def findClosestNames(self, item_names):
@@ -622,7 +640,7 @@ class DbHandler():
             inv_crates = 0 if inv_crates is None else inv_crates
             inv_non_crates = 0 if inv_non_crates is None else inv_non_crates
             item_info = self._getItemInfoDict(display_name)
-            if 'VehicleProfileType' in item_info['category'] or item_info['category'] == 'Structures':
+            if item_info['category'] in ['Vehicles', 'Structures']:
                 required_amount = quota_amount - (inv_crates * item_info['per_crate'] + inv_non_crates)
             else:
                 required_amount = quota_amount - inv_crates
