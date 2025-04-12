@@ -49,7 +49,7 @@ class Item(commands.GroupCog, name='item'):
             return
         
         item_list = self.db.fetchLockedItems(inter.guild_id)
-        if item_list == {}:
+        if item_list == []:
             await inter.response.send_message('No locked items found', ephemeral=True)
             return
         
