@@ -601,7 +601,7 @@ class DbHandler():
         return quota_list
 
     # Fetches the requirements to meet quotas for a stockpile
-    def getRequirements(self, stock_id):
+    def getRequirements(self, guild_id, stock_id, show_locked):
         # Get stockpile info
         self.cur.execute("""
             SELECT stock.name, stock.last_update, town.name, struc.type
@@ -622,7 +622,7 @@ class DbHandler():
 
         # Get item quotas and inventories
         self.cur.execute("""
-            SELECT item.display_name, quota.amount, inv.crates, inv.non_crates
+            SELECT item.id, item.display_name, quota.amount, inv.crates, inv.non_crates
             FROM quotas quota
             JOIN items item ON quota.item_id = item.id
             LEFT JOIN inventory inv ON quota.item_id = inv.item_id AND quota.stock_id = inv.stock_id
@@ -632,10 +632,18 @@ class DbHandler():
         reqs = self.cur.fetchall()
         if not reqs:
             return {}
+        
+        # Get locked items
+        self.cur.execute("SELECT item_id FROM locked_items WHERE guild_id = ?", (guild_id,))
+        locked_ids = self.cur.fetchall()
+        if locked_ids:
+            locked_ids = [id[0] for id in locked_ids]
 
         # Get item info and calculate required amounts to meet quotas
         for r in reqs:
-            display_name, quota_amount, inv_crates, inv_non_crates = r
+            item_id, display_name, quota_amount, inv_crates, inv_non_crates = r
+            if not show_locked and item_id in locked_ids:
+                continue
             # Missing items can be treated as inventory of 0
             inv_crates = 0 if inv_crates is None else inv_crates
             inv_non_crates = 0 if inv_non_crates is None else inv_non_crates
@@ -653,3 +661,48 @@ class DbHandler():
         
         return req_dict
 
+    # Updates locked_items table. Adds rows for newly locked items, deletes rows for unlocked items
+    # Rows are set with guild_id to maintain tech confidentiality
+    def setTechLock(self, guild_id, item_list, is_locked):
+        # Parse item list and get ids
+        items = [item.strip() for item in item_list.split(',')]
+        for display_name in items:
+            self.cur.execute('SELECT id FROM items WHERE display_name = ?', (display_name,))
+            item_id = self.cur.fetchone()
+            if not item_id:
+                raise ValueError(f"Item {display_name} not found")
+            else:
+                item_id = item_id[0]
+            if is_locked:
+                self.cur.execute("""
+                    INSERT INTO locked_items (item_id, guild_id)
+                    VALUES (?, ?)
+                    ON CONFLICT (item_id, guild_id) DO NOTHING
+                    """, (item_id, guild_id)
+                )
+            elif is_locked == False:
+                self.cur.execute(
+                    "DELETE FROM locked_items WHERE item_id = ? AND guild_id = ?", 
+                    (item_id, guild_id)
+                )
+        self.conn.commit()
+
+    # Fetches all locked items. Returns dict of display_name: item info
+    def fetchLockedItems(self, guild_id):
+        self.cur.execute("""
+            SELECT item.display_name
+            FROM locked_items lock
+            JOIN items item
+            ON lock.item_id = item.id
+            WHERE lock.guild_id = ?
+            """, (guild_id,)
+        )
+        result = self.cur.fetchall()
+        item_list = []
+        if result:
+            for item in result:
+                item_list.append({
+                    'quantity': 0,
+                    'info': self._getItemInfoDict(item[0])
+                })
+        return item_list

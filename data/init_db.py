@@ -204,6 +204,14 @@ def init_db_tables(db_path):
         ingredients TEXT,
         description TEXT
     );
+                         
+    CREATE TABLE IF NOT EXISTS locked_items (
+        item_id INTEGER NOT NULL,
+        guild_id INTEGER NOT NULL,
+        PRIMARY KEY (item_id, guild_id),
+        FOREIGN KEY (item_id) REFERENCES items(id),
+        FOREIGN KEY (guild_id) REFERENCES guilds(id)
+    );
 
     CREATE TABLE IF NOT EXISTS inventory (
         item_id INTEGER NOT NULL,

@@ -4,19 +4,6 @@ from discord.ext import commands
 from data.db_io import DbHandler
 from data.objects.item import Item
 
-ITEM_CATEGORIES = [
-    'SmallArms', 
-    'HeavyArms', 
-    'HeavyAmmo', 
-    'Utility', 
-    'Medical', 
-    'Supplies', 
-    'Uniforms', 
-    'Vehicles', 
-    'Structures',
-    'Other'
-]
-
 ITEMS_PER_PAGE = 10
 
 class ItemBrowserView(discord.ui.View):

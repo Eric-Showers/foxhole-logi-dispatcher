@@ -8,7 +8,6 @@ from dotenv import load_dotenv
 from data.db_io import DbHandler
 import utils.checks as checks
 import utils.helpers as helpers
-from views.items import FactionSelectView
 
 load_dotenv()
 
@@ -34,7 +33,7 @@ async def on_ready():
 
 async def setup_hook():
     for file in os.listdir("./commands"):
-        #stock.py, preset.py, quota.py
+        #stock.py, preset.py, quota.py, items.py
         if file.endswith(".py"):
             await bot.load_extension(f"commands.{file[:-3]}")
 
@@ -58,7 +57,7 @@ async def setAccess(inter: discord.Interaction, role: discord.Role, access_level
 
 
 @bot.tree.command(name='requirements', description='Get the required crates to meet quotas on a stockpile')
-async def requirements(inter: discord.Interaction, stock_id: int):
+async def requirements(inter: discord.Interaction, stock_id: int, show_locked: bool=False):
     try:
         checks.checkRegistration(bot.db, inter.guild_id)
         checks.checkAccessLevel(bot.db, inter, 1)
@@ -66,7 +65,7 @@ async def requirements(inter: discord.Interaction, stock_id: int):
     except discord.app_commands.CheckFailure as e:
         await inter.response.send_message(str(e), ephemeral=True)
         return
-    req_dict = bot.db.getRequirements(stock_id)
+    req_dict = bot.db.getRequirements(inter.guild_id, stock_id, show_locked)
     if req_dict == {}:
         await inter.response.send_message(f"No outstanding requirements found for stock ID {stock_id}", ephemeral=True)
         return
@@ -91,15 +90,6 @@ async def requirements(inter: discord.Interaction, stock_id: int):
     await inter.response.send_message(f"```{chunks[0]}```")
     for chunk in chunks[1:]:
         await inter.followup.send(f"```{chunk}```")
-
-
-@bot.tree.command(name='items')
-async def counter(inter: discord.Interaction):
-    await inter.response.send_message(
-        "Select a faction to begin browsing items:",
-        view=FactionSelectView(bot.db),
-        ephemeral=True
-    )
 
 
 bot.setup_hook = setup_hook
