@@ -525,6 +525,67 @@ class DbHandler():
         )
         self.conn.commit()
 
+    # Edit the quotas in a preset
+    def editPreset(self, guild_id, preset_name, new_quota_str):
+        # Get existing quotas
+        self.cur.execute("""
+            SELECT quota_string FROM presets WHERE name = ? AND guild_id = ?
+            """, (preset_name, guild_id)
+        )
+        old_quota_str = self.cur.fetchone()
+        if old_quota_str == []:
+            raise ValueError(f"Preset named {preset_name} not found")
+
+        # Parse quota string
+        old_quotas = {}
+        for q in old_quota_str[0].split(','):
+            display_name, quantity = q.strip().split(':')
+            old_quotas[display_name] = int(quantity)
+        
+        # Validate item data in the new quota string, overwrite old quotas
+        for q in new_quota_str.split(','):
+            display_name, quantity = q.strip().split(':')
+            old_quotas[display_name] = int(quantity)
+        quota_ids = {}
+        wrong_names = []
+        edited_quotas = []
+        for display_name, quantity in old_quotas.items():
+            self.cur.execute("""
+                SELECT id FROM items WHERE display_name = ?
+                """, (display_name,)
+            )
+            item_id = self.cur.fetchone()
+            if item_id:
+                quota_ids[item_id[0]] = quantity
+                edited_quotas.append(f"{display_name}:{quantity}")
+            else:
+                wrong_names.append(display_name)
+        edited_quota_str = ', '.join(edited_quotas)
+
+        # Return name suggestions if any don't match
+        if wrong_names:
+            similar_names = self.findClosestNames(wrong_names)
+            suggestions = []
+            for name, suggestion in similar_names.items():
+                if suggestion:
+                    suggestions.append(f"{name} -> {suggestion}")
+                else:
+                    suggestions.append(f"{name} -> No match found")
+            raise ValueError("Incorrect item names. Possible matches: \n```{}```".format(
+                '\n'.join(suggestions)
+            ))
+        
+        # Update preset in DB
+        self.cur.execute("""
+                         INSERT INTO presets (name, quota_string, guild_id)
+                         VALUES (?,?,?)
+                         ON CONFLICT (name, guild_id)
+                         DO UPDATE SET quota_string = ?
+                         """, (preset_name, edited_quota_str, guild_id, edited_quota_str)
+        )
+        self.conn.commit()
+
+
     # Deletes a named preset from the database
     def deletePreset(self, guild_id, preset_name):
         self.cur.execute("DELETE FROM presets WHERE name = ? AND guild_id = ?", (preset_name, guild_id))
@@ -577,7 +638,7 @@ class DbHandler():
             return []
         return [r[0] for r in resp]
     
-    # Fetches all quotas in a preset, returns dict of quotas, dict of item info
+    # Fetches all quotas in a preset, returns dict of quotas and item info
     def fetchPresetList(self, guild_id, preset_name):
         # Get quota string
         self.cur.execute("""
