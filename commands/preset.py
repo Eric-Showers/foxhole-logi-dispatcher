@@ -28,7 +28,7 @@ class Preset(commands.GroupCog, name='preset'):
         except ValueError as e:
             await inter.response.send_message(str(e), ephemeral=True)
             return
-        await inter.response.send_message(f"Preset {preset_name} created succesfully")
+        await inter.response.send_message(f"Preset {preset_name} created succesfully", ephemeral=True)
 
     @app_commands.command(name='edit', description='Edit specific item quotas in a preset')
     @app_commands.describe(preset_name='Name of the preset to edit', quota_list='name:amount, name:amount, ...')
@@ -48,7 +48,7 @@ class Preset(commands.GroupCog, name='preset'):
         except ValueError as e:
             await inter.response.send_message(str(e), ephemeral=True)
             return
-        await inter.response.send_message(f"Preset {preset_name} edited succesfully")
+        await inter.response.send_message(f"Preset {preset_name} edited succesfully", ephemeral=True)
 
     @app_commands.command(name='delete', description='Deletes a named preset (does not remove from active quotas)')
     @app_commands.describe(preset_name='Name of the preset')
@@ -65,7 +65,7 @@ class Preset(commands.GroupCog, name='preset'):
         except ValueError as e:
             await inter.response.send_message(str(e), ephemeral=True)
             return
-        await inter.response.send_message(f"Preset {preset_name} deleted successfully")
+        await inter.response.send_message(f"Preset {preset_name} deleted successfully", ephemeral=True)
 
     @app_commands.command(name='apply', description='Adds a preset quota to a stockpile (adds to existing quotas)')
     @app_commands.describe(stock_id='Stock ID to apply the preset', preset_name='Name of the preset')
@@ -83,7 +83,7 @@ class Preset(commands.GroupCog, name='preset'):
         except ValueError as e:
             await inter.response.send_message(str(e), ephemeral=True)
             return
-        await inter.response.send_message(f"Preset {preset_name} added to stockpile with id {stock_id}")
+        await inter.response.send_message(f"Preset {preset_name} added to stockpile with id {stock_id}", ephemeral=True)
 
     @app_commands.command(name='list', description='List all preset names')
     async def listPresets(self, inter: discord.Interaction):
