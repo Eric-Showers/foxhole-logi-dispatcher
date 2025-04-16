@@ -6,7 +6,7 @@ from discord.ext import commands
 
 import utils.checks as checks
 import utils.helpers as helpers
-from views.items import FactionSelectView
+from views.itemMenu import FactionSelectView
 
 
 class Item(commands.GroupCog, name='item'):
@@ -56,18 +56,15 @@ class Item(commands.GroupCog, name='item'):
         categorized = helpers.organizeItemList(item_list)
         locks_table = ['Category   | Item Name\n-----------------------------------']
         for cat, cat_items in categorized.items():
-            locks_table.append(f"{cat: <10} | {cat_items[0]['display_name']}")
+            locks_table.append(f"{cat: <10} | {cat_items[0].display_name}")
             for item in cat_items[1:]:
-                locks_table.append(f"{'': <10} | {item['display_name']}")
+                locks_table.append(f"{'': <10} | {item.display_name}")
         resp_str = '\n'.join(locks_table)
         # Handle character limit
         chunks = helpers.chunk_response(resp_str)
         await inter.response.send_message(f"```{chunks[0]}```")
         for chunk in chunks[1:]:
             await inter.followup.send(f"```{chunk}```")
-        
-        
-
         
 
 async def setup(bot):

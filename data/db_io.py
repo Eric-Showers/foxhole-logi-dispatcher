@@ -50,42 +50,19 @@ class DbHandler():
         )
         result = self.cur.fetchone()
         return result[0] if result and result[0] is not None else 0
-
-    # Takes a row (list) from the items table and returns a dict
-    def _getItemInfoDict(self, display_name):
-        self.cur.execute("""
-            SELECT * FROM items WHERE display_name = ?
-            """, (display_name,)
-        )
-        item_row = self.cur.fetchone()
-        if not item_row:
-            raise ValueError(f"Internal Error (notify dev): Item {display_name} not found")
-        return {
-            'id': item_row[0],
-            'code_name': item_row[1],
-            'display_name': item_row[2],
-            'category': item_row[3],
-            'per_crate': item_row[4],
-            'factory_queue': item_row[5],
-            'mpf_queue': item_row[6],
-            'faction': item_row[7],
-            'reserve_max_quantity': item_row[8],
-            'shippable_type': item_row[9],
-            'ingredients': item_row[10],
-            'description': item_row[11]
-        }
     
-    def getItemIds(self, display_name_list):
+    # Given a list of display names, returns a list of Item objects or raises ValueError for incorrect names
+    def getItems(self, display_name_list):
         wrong_names = []
-        name_id_dict = {}
+        items = []
         for display_name in display_name_list:
             self.cur.execute("""
-                SELECT id FROM items WHERE display_name = ?
+                SELECT * FROM items WHERE display_name = ?
                 """, (display_name,)
             )
-            item_id = self.cur.fetchone()
-            if item_id:
-                name_id_dict[display_name] = item_id[0]
+            result = self.cur.fetchone()
+            if result:
+                items.append(Item(result))
             else:
                 wrong_names.append(display_name)
 
@@ -102,7 +79,7 @@ class DbHandler():
                 '\n'.join(suggestions)
             ))
         else:
-            return name_id_dict
+            return items
     
     # Fetches all item categories
     def getCategories(self):
@@ -238,19 +215,11 @@ class DbHandler():
         result = self.cur.fetchall()
         if not result:
             return []
-        item_list = []
-        for item in result:
-            display_name, crates, non_crates = item
-            item_info = self._getItemInfoDict(display_name)
-            if non_crates != 0:
-                quantity = crates * item_info['per_crate'] + non_crates
-            else:
-                quantity = crates
-            item_list.append({
-                'quantity': quantity,
-                'info': item_info
-            })
-        return item_list
+        inventory_dict = {r[0]: [r[1], r[2]] for r in result}
+        items = self.getItems(inventory_dict.keys())
+        for item in items:
+            item.crates, item.non_crates = inventory_dict[item.display_name]
+        return items
     
     def setInventory(self, stock_id, crates_list, non_crates_list):
         # Parse item list
@@ -266,29 +235,29 @@ class DbHandler():
                 item_amounts[name] = {'crates':None, 'non_crates':0}
             item_amounts[name]['non_crates'] = int(amount)
         
-        # Get item_id for each item
-        name_id_dict = self.getItemIds(item_amounts.keys())
-        for name, id in name_id_dict.items():
-            item_amounts[name]['id'] = id
+        # Get Item for each display name
+        items = self.getItems(item_amounts.keys())
+        for item in items:
+            item.crates = item_amounts[item.display_name]['crates']
+            item.non_crates = item_amounts[item.display_name]['non_crates']
 
         # Update inventory rows, overwrite existing values
-        for item_dict in item_amounts.values():
-            print(item_dict)
-            if item_dict['crates'] is not None:
+        for item in items:
+            if item.crates is not None:
                 self.cur.execute("""
                     INSERT INTO inventory (stock_id, item_id, crates)
                     VALUES (?, ?, ?)
                     ON CONFLICT (stock_id, item_id)
                     DO UPDATE SET crates = ?
-                    """, (stock_id, item_dict['id'], item_dict['crates'], item_dict['crates'])
+                    """, (stock_id, item.id, item.crates, item.crates)
                 )
-            if item_dict['non_crates'] is not None:
+            if item.non_crates is not None:
                 self.cur.execute("""
                     INSERT INTO inventory (stock_id, item_id, non_crates)
                     VALUES (?, ?, ?)
                     ON CONFLICT (stock_id, item_id)
                     DO UPDATE SET non_crates = ?
-                    """, (stock_id, item_dict['id'], item_dict['non_crates'], item_dict['non_crates'])
+                    """, (stock_id, item.id, item.non_crates, item.non_crates)
                 )
         self.conn.commit()
 
@@ -350,126 +319,25 @@ class DbHandler():
         self.cur.execute("UPDATE stockpiles SET last_update = ? WHERE id = ?", (int(time.time()),stock_id))
         self.conn.commit()
 
-    # Handles a TSV file with multiple stockpiles
-    def updateMulti(self, stock_ids, tsv_file):
-        # Read TSV file
-        reader = csv.reader(tsv_file, delimiter='\t')
-        header = next(reader)
-        if header != TSV_HEADER.split('\t'):
-            raise ValueError("Invalid TSV file, headers do not match")
-        
-        # Save stock_id, code_name, name, quantity, crated
-        data = []
-        file_stock_ids = []
-        for r in reader:
-            item_data = {
-                'stock_id': int(r[0].split('.')[0]),
-                'code_name': r[9], 
-                'display_name': r[4], 
-                'crated': True if r[5] == 'true' else False, 
-                'amount': int(r[3])
-            }
-            if item_data['stock_id'] not in file_stock_ids:
-                if item_data['stock_id'] not in stock_ids:
-                    raise ValueError(f"Stock ID {item_data['stock_id']} read from file but was not listed in command")
-                file_stock_ids.append(item_data['stock_id'])
-            data.append(item_data)
-        for id in stock_ids:
-            if id not in file_stock_ids:
-                raise ValueError(f"Stock ID {id} listed in command but not found in file")
-        if len(data) == 0:
-            raise ValueError('TSV files have no items')
-
-        # Get item_id for each item
-        for d in data:
-            self.cur.execute("""
-                SELECT id FROM items WHERE code_name = ?
-                """, (d['code_name'],)
-            )
-            item_id = self.cur.fetchone()
-            if not item_id:
-                raise ValueError(f"Item {d['display_name']} not found (notify dev)")
-            else:
-                d['item_id'] = item_id[0]
-
-        # Update inventory by deleting previous values, then adding new ones
-        for id in stock_ids:
-            self.cur.execute("DELETE FROM inventory WHERE stock_id = ?", (id,))
-        for d in data:
-            if d['crated']:
-                self.cur.execute("""
-                    INSERT INTO inventory (item_id, stock_id, crates)
-                    VALUES (?, ?, ?)
-                    ON CONFLICT (item_id, stock_id)
-                    DO UPDATE SET crates = ?
-                    """,
-                    (d['item_id'], d['stock_id'], d['amount'], d['amount'])
-                )
-            else:
-                self.cur.execute("""
-                    INSERT INTO inventory (item_id, stock_id, non_crates)
-                    VALUES (?, ?, ?)
-                    ON CONFLICT (item_id, stock_id)
-                    DO UPDATE SET non_crates = ?
-                    """,
-                    (d['item_id'], d['stock_id'], d['amount'], d['amount'])
-                )
-
-        # Update stockpile timestamps
-        for id in stock_ids:
-            self.cur.execute("UPDATE stockpiles SET last_update = ? WHERE id = ?", (int(time.time()),id))
-        self.conn.commit()
-        return stock_ids
-
     # Updates quotas
     # quota_data is a string of the form "display_name:quantity, display_name:quantity, ..."
     def addQuotas(self, stock_id, quota_data):
         # Parse quota_data
         quotas = {}
-        for q in quota_data.split(', '):
-            name, quantity = q.split(':')
-            quotas[name] = int(quantity)
-
-        # Get item_id for each item
-        quota_ids = {}
-        wrong_names = []
-        for display_name, quantity in quotas.items():
-            self.cur.execute("""
-                SELECT id FROM items WHERE display_name = ?
-                """, (display_name,)
-            )
-            item_id = self.cur.fetchone()
-            if item_id:
-                quota_ids[item_id[0]] = quantity
-            else:
-                wrong_names.append(display_name)
-
-        # Return name suggestions if any don't match
-        if wrong_names:
-            similar_names = self.findClosestNames(wrong_names)
-            suggestions = []
-            for name, suggestion in similar_names.items():
-                if suggestion:
-                    suggestions.append(f"{name} -> {suggestion}")
-                else:
-                    suggestions.append(f"{name} -> No match found")
-            raise ValueError("Incorrect item names. Possible matches: \n```{}```".format(
-                '\n'.join(suggestions)
-            ))
-        
-        # Get item_id for each item
-        name_id_dict = self.getItemIds(item_amounts.keys())
-        for name, id in name_id_dict.items():
-            item_amounts[name]['id'] = id
+        for q in quota_data.split(','):
+            name, quantity = q.strip().split(':')
+            quotas[name] = {'crates': int(quantity)}
+        items = self.getItems(quotas.keys())
         
         # Update quotas, overwrite existing values
-        for item_id, quantity in quota_ids.items():
+        for item in items:
+            item.crates = quotas[item.display_name]['crates']
             self.cur.execute("""
                 INSERT INTO quotas (stock_id, item_id, amount)
                 VALUES (?, ?, ?)
                 ON CONFLICT (stock_id, item_id)
                 DO UPDATE SET amount = ?
-                """, (stock_id, item_id, quantity, quantity)
+                """, (stock_id, item.id, item.crates, item.crates)
             )
         self.conn.commit()
 
@@ -488,11 +356,14 @@ class DbHandler():
             WHERE q.stock_id = ?
             """, (stock_id,)
         )
-        res = self.cur.fetchall()
-        if not res:
+        result = self.cur.fetchall()
+        if not result:
             return []
-        
-        return [{'info': self._getItemInfoDict(r[0]), 'quantity': r[1]} for r in res]
+        quota_dict = {r[0]:r[1] for r in result}
+        items = self.getItems(quota_dict.keys())
+        for item in items:
+            item.crates = quota_dict[item.display_name]
+        return items
     
     # Adds a quota preset string to the database
     def createPreset(self, guild_id, preset_name, quota_data):
@@ -500,36 +371,14 @@ class DbHandler():
         self.cur.execute("SELECT name FROM presets WHERE guild_id = ? AND name = ?", (guild_id,preset_name))
         if self.cur.fetchone():
             raise ValueError(f"Preset named {preset_name} already exists")
-
-        # Validate item data in the quota string
+        
+        # Parse quota_data
         quotas = {}
-        for q in quota_data.split(', '):
-            display_name, quantity = q.split(':')
-            quotas[display_name] = int(quantity)
-        quota_ids = {}
-        wrong_names = []
-        for display_name, quantity in quotas.items():
-            self.cur.execute("""
-                SELECT id FROM items WHERE display_name = ?
-                """, (display_name,)
-            )
-            item_id = self.cur.fetchone()
-            if item_id:
-                quota_ids[item_id[0]] = quantity
-            else:
-                wrong_names.append(display_name)
-        # Return name suggestions if any don't match
-        if wrong_names:
-            similar_names = self.findClosestNames(wrong_names)
-            suggestions = []
-            for name, suggestion in similar_names.items():
-                if suggestion:
-                    suggestions.append(f"{name} -> {suggestion}")
-                else:
-                    suggestions.append(f"{name} -> No match found")
-            raise ValueError("Incorrect item names. Possible matches: \n```{}```".format(
-                '\n'.join(suggestions)
-            ))
+        for q in quota_data.split(','):
+            name, quantity = q.strip().split(':')
+            quotas[name] = {'crates': int(quantity)}
+        # Get items (to validate display names)
+        items = self.getItems(quotas.keys())
 
         # Add preset to DB
         self.cur.execute(
@@ -546,47 +395,22 @@ class DbHandler():
             """, (preset_name, guild_id)
         )
         old_quota_str = self.cur.fetchone()
-        if old_quota_str == []:
-            raise ValueError(f"Preset named {preset_name} not found")
 
-        # Parse quota string
+        # Parse previous quota string
         old_quotas = {}
         for q in old_quota_str[0].split(','):
             display_name, quantity = q.strip().split(':')
             old_quotas[display_name] = int(quantity)
         
-        # Validate item data in the new quota string, overwrite old quotas
+        # Validate item data in the new quota string and overwrite previous quota quantities
         for q in new_quota_str.split(','):
             display_name, quantity = q.strip().split(':')
             old_quotas[display_name] = int(quantity)
-        quota_ids = {}
-        wrong_names = []
+        items = self.getItems(old_quotas.keys())    # Validate display names
         edited_quotas = []
-        for display_name, quantity in old_quotas.items():
-            self.cur.execute("""
-                SELECT id FROM items WHERE display_name = ?
-                """, (display_name,)
-            )
-            item_id = self.cur.fetchone()
-            if item_id:
-                quota_ids[item_id[0]] = quantity
-                edited_quotas.append(f"{display_name}:{quantity}")
-            else:
-                wrong_names.append(display_name)
+        for item in items:
+            edited_quotas.append(f"{item.display_name}:{old_quotas[item.display_name]}")
         edited_quota_str = ', '.join(edited_quotas)
-
-        # Return name suggestions if any don't match
-        if wrong_names:
-            similar_names = self.findClosestNames(wrong_names)
-            suggestions = []
-            for name, suggestion in similar_names.items():
-                if suggestion:
-                    suggestions.append(f"{name} -> {suggestion}")
-                else:
-                    suggestions.append(f"{name} -> No match found")
-            raise ValueError("Incorrect item names. Possible matches: \n```{}```".format(
-                '\n'.join(suggestions)
-            ))
         
         # Update preset in DB
         self.cur.execute("""
@@ -597,7 +421,6 @@ class DbHandler():
                          """, (preset_name, edited_quota_str, guild_id, edited_quota_str)
         )
         self.conn.commit()
-
 
     # Deletes a named preset from the database
     def deletePreset(self, guild_id, preset_name):
@@ -613,29 +436,20 @@ class DbHandler():
         )
         quota_data = self.cur.fetchone()
         quotas = {}
-        for q in quota_data[0].split(', '):
-            name, quantity = q.split(':')
+        for q in quota_data[0].split(','):
+            name, quantity = q.strip().split(':')
             quotas[name] = int(quantity)
-        quota_ids = {}
-        for name, quantity in quotas.items():
-            self.cur.execute("""
-                SELECT id FROM items WHERE display_name = ?
-                """, (name,)
-            )
-            item_id = self.cur.fetchone()
-            if item_id:
-                quota_ids[item_id[0]] = quantity
-            else:
-                raise ValueError(f"Internal error (notify dev): Could not find item {name}")
+        items = self.getItems(quotas.keys())
             
         # Update quotas, add to existing values
-        for item_id, quantity in quota_ids.items():
+        for item in items:
+            item.crates = quotas[item.display_name]
             self.cur.execute("""
                 INSERT INTO quotas (stock_id, item_id, amount)
                 VALUES (?, ?, ?)
                 ON CONFLICT (stock_id, item_id)
                 DO UPDATE SET amount = amount + ?
-                """, (stock_id, item_id, quantity, quantity)
+                """, (stock_id, item.id, item.crates, item.crates)
             )
         self.conn.commit()
 
@@ -661,21 +475,17 @@ class DbHandler():
         res = self.cur.fetchone()
         # Parse quota string
         quotas = {}
-        for q in res[0].split(', '):
-            display_name, quantity = q.split(':')
+        for q in res[0].split(','):
+            display_name, quantity = q.strip().split(':')
             quotas[display_name] = int(quantity)
-
-        quota_list = []
-        for display_name, quantity in quotas.items():
-            quota_list.append({
-                'quantity': quantity,
-                'info': self._getItemInfoDict(display_name)
-            })
+        items = self.getItems(quotas.keys())
+        for item in items:
+            item.crates = quotas[item.display_name]
         
-        return quota_list
+        return items
 
     # Fetches the requirements to meet quotas for a stockpile
-    def getRequirements(self, guild_id, stock_id, show_locked):
+    def getStatus(self, guild_id, stock_id, show_locked):
         # Get stockpile info
         self.cur.execute("""
             SELECT stock.name, stock.last_update, town.name, struc.type
@@ -686,12 +496,11 @@ class DbHandler():
             """, (stock_id,)
         )
         stock_name, last_update, stock_town, stock_struct = self.cur.fetchall()[0]
-        req_dict = {
+        stock_info = {
             'name': stock_name,
             'last_update': last_update,
             'town': stock_town,
-            'type': stock_struct,
-            'requirements': []
+            'type': stock_struct
         }
 
         # Get item quotas and inventories
@@ -703,8 +512,8 @@ class DbHandler():
             WHERE quota.stock_id = ?
             """, (stock_id,)
         )
-        reqs = self.cur.fetchall()
-        if not reqs:
+        result = self.cur.fetchall()
+        if not result:
             return {}
         
         # Get locked items
@@ -712,52 +521,48 @@ class DbHandler():
         locked_ids = self.cur.fetchall()
         if locked_ids:
             locked_ids = [id[0] for id in locked_ids]
-
-        # Get item info and calculate required amounts to meet quotas
-        for r in reqs:
-            item_id, display_name, quota_amount, inv_crates, inv_non_crates = r
-            if not show_locked and item_id in locked_ids:
-                continue
-            # Missing items can be treated as inventory of 0
-            inv_crates = 0 if inv_crates is None else inv_crates
-            inv_non_crates = 0 if inv_non_crates is None else inv_non_crates
-            item_info = self._getItemInfoDict(display_name)
-            if item_info['category'] in ['Vehicles', 'Structures']:
-                required_amount = quota_amount - (inv_crates * item_info['per_crate'] + inv_non_crates)
+        if not show_locked:
+            items = self.getItems([r[1] for r in result if r[0] not in locked_ids])
+        else:
+            items = self.getItems([r[1] for r in result])
+        quotas = {}
+        required_items = []
+        required_amounts = {}
+        for item, r in zip(items, result):
+            quotas[item.display_name] = r[2]
+            if r[3] is not None:
+                item.crates = r[3]
+            if r[4] is not None:
+                item.non_crates = r[4]
+            if item.category in ['Vehicles', 'Structures']:
+                quantity = item.getTotal()
             else:
-                required_amount = quota_amount - inv_crates
-            if required_amount < 1:
-                continue    # Ignore quotas that are already satisfied
-            req_dict['requirements'].append({
-                'quantity': required_amount,
-                'info': item_info
-            })
+                quantity = item.crates
+            required_amount = r[2] - quantity
+            if required_amount > 0:
+                required_items.append(item)
+                required_amounts[item.display_name] = required_amount
         
-        return req_dict
+        return stock_info, required_items, quotas, required_amounts
 
     # Updates locked_items table. Adds rows for newly locked items, deletes rows for unlocked items
     # Rows are set with guild_id to maintain tech confidentiality
     def setTechLock(self, guild_id, item_list, is_locked):
         # Parse item list and get ids
-        items = [item.strip() for item in item_list.split(',')]
-        for display_name in items:
-            self.cur.execute('SELECT id FROM items WHERE display_name = ?', (display_name,))
-            item_id = self.cur.fetchone()
-            if not item_id:
-                raise ValueError(f"Item {display_name} not found")
-            else:
-                item_id = item_id[0]
+        display_names = [name.strip() for name in item_list.split(',')]
+        items = self.getItems(display_names)
+        for item in items:
             if is_locked:
                 self.cur.execute("""
                     INSERT INTO locked_items (item_id, guild_id)
                     VALUES (?, ?)
                     ON CONFLICT (item_id, guild_id) DO NOTHING
-                    """, (item_id, guild_id)
+                    """, (item.id, guild_id)
                 )
             elif is_locked == False:
                 self.cur.execute(
                     "DELETE FROM locked_items WHERE item_id = ? AND guild_id = ?", 
-                    (item_id, guild_id)
+                    (item.id, guild_id)
                 )
         self.conn.commit()
 
@@ -772,11 +577,7 @@ class DbHandler():
             """, (guild_id,)
         )
         result = self.cur.fetchall()
-        item_list = []
         if result:
-            for item in result:
-                item_list.append({
-                    'quantity': 0,
-                    'info': self._getItemInfoDict(item[0])
-                })
-        return item_list
+            return self.getItems([r[0] for r in result])
+        else:
+            return []

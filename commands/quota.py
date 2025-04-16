@@ -26,7 +26,7 @@ class Quota(commands.GroupCog, name='quota'):
         except ValueError as e:
             await inter.response.send_message(str(e), ephemeral=True)
             return
-        await inter.response.send_message(f"Added quotas to stockpile with ID {stock_id}")
+        await inter.response.send_message(f"Added quotas to stockpile with ID {stock_id}", ephemeral=True)
 
 
     @app_commands.command(name='delete', description='Removes all quotas for a stockpile.')
@@ -40,7 +40,7 @@ class Quota(commands.GroupCog, name='quota'):
             await inter.response.send_message(str(e), ephemeral=True)
             return
         self.db.deleteQuotas(stock_id)
-        await inter.response.send_message(f"Deleted quotas for stockpile with ID {stock_id}")
+        await inter.response.send_message(f"Deleted quotas for stockpile with ID {stock_id}", ephemeral=True)
 
     @app_commands.command(name='view', description='View the quotas that are set on a stockpile')
     @app_commands.describe(stock_id='Stock ID to view quotas on')
@@ -52,26 +52,26 @@ class Quota(commands.GroupCog, name='quota'):
         except discord.app_commands.CheckFailure as e:
             await inter.response.send_message(str(e), ephemeral=True)
             return
-        quota_list = self.db.fetchQuotas(stock_id)
-        if quota_list == []:
+        item_list = self.db.fetchQuotas(stock_id)
+        if item_list == []:
             await inter.response.send_message(f"No quotas found on stock ID {stock_id}", ephemeral=True)
             return
         
         # Build table
-        categorized = helpers.organizeItemList(quota_list)
+        categorized = helpers.organizeItemList(item_list)
         quota_table = ['Category   |  Quantity  | Item Name\n-----------------------------------']
         for cat, quotas in categorized.items():
-            quota_table.append(f"{cat: <10} | {quotas[0]['quantity']: <10} | {quotas[0]['display_name']}")
+            quota_table.append(f"{cat: <10} | {quotas[0].crates: <10} | {quotas[0].display_name}")
             for q in quotas[1:]:
-                quota_table.append(f"{'': <10} | {q['quantity']: <10} | {q['display_name']}")
+                quota_table.append(f"{'': <10} | {q.crates: <10} | {q.display_name}")
         resp_str = '\n'.join(quota_table)
-        resp_str += '\n\nQuota set string:\n'+', '.join([f"{q['info']['display_name']}:{q['quantity']}" for q in quota_list])
+        resp_str += '\n\nQuota set string:\n'+', '.join([f"{q.display_name}:{q.crates}" for q in item_list])
         
         # Handle overflow
         chunks = helpers.chunk_response(resp_str)
-        await inter.response.send_message(f"```{chunks[0]}```")
+        await inter.response.send_message(f"```{chunks[0]}```", ephemeral=True)
         for chunk in chunks[1:]:
-            await inter.followup.send(f"```{chunk}```")
+            await inter.followup.send(f"```{chunk}```", ephemeral=True)
 
 
 async def setup(bot):

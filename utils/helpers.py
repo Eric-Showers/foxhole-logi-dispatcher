@@ -41,13 +41,16 @@ def organizeItemList(item_list):
     # Sort quotas into categories
     categorized = {}
     for item in item_list:
-        category = item['info']['category']
-        if category not in categorized:
-            categorized[category] = []
-        categorized[category].append({'display_name': item['info']['display_name'], 'quantity': item['quantity']})
+        if item.category not in categorized:
+            categorized[item.category] = []
+        categorized[item.category].append(item)
     # Sort each category by quantity, descending order
-    for cat, quotas in categorized.items():
-        categorized[cat] = sorted(quotas, key=lambda x: x['quantity'], reverse=True)
+    for cat, items in categorized.items():
+        categorized[cat] = sorted(
+            items, 
+            key=lambda x: x.getTotal(), 
+            reverse=True
+        )
     return categorized
 
 

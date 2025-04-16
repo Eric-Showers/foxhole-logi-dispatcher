@@ -56,40 +56,9 @@ async def setAccess(inter: discord.Interaction, role: discord.Role, access_level
     await inter.response.send_message(f"Access level updated for {role.name}")
 
 
-@bot.tree.command(name='requirements', description='Get the required crates to meet quotas on a stockpile')
+@bot.tree.command(name='requirements', description='Deprecated. Use "/stock status"')
 async def requirements(inter: discord.Interaction, stock_id: int, show_locked: bool=False):
-    try:
-        checks.checkRegistration(bot.db, inter.guild_id)
-        checks.checkAccessLevel(bot.db, inter, 1)
-        checks.checkStockId(bot.db, inter, stock_id)
-    except discord.app_commands.CheckFailure as e:
-        await inter.response.send_message(str(e), ephemeral=True)
-        return
-    req_dict = bot.db.getRequirements(inter.guild_id, stock_id, show_locked)
-    if req_dict == {}:
-        await inter.response.send_message(f"No outstanding requirements found for stock ID {stock_id}", ephemeral=True)
-        return
-    categorized = helpers.organizeItemList(req_dict['requirements'])
-
-    # Build response table
-    reqs_table = ["({}, {} {}, ID: {}, last updated: {})\n".format(
-        req_dict['name'],
-        req_dict['town'],
-        req_dict['type'],
-        stock_id,
-        helpers.get_relative_time_str(req_dict['last_update'])
-    )]
-    reqs_table.append('Category   | Quantity | Item Name\n-----------------------------------')
-    for cat, cat_items in categorized.items():
-        reqs_table.append(f"{cat: <10} | {cat_items[0]['quantity']: <8} | {cat_items[0]['display_name']}")
-        for item in cat_items[1:]:
-            reqs_table.append(f"{'': <10} | {item['quantity']: <8} | {item['display_name']}")
-    resp_str = '\n'.join(reqs_table)
-    # Handle character limit
-    chunks = helpers.chunk_response(resp_str)
-    await inter.response.send_message(f"```{chunks[0]}```", ephemeral=True)
-    for chunk in chunks[1:]:
-        await inter.followup.send(f"```{chunk}```", ephemeral=True)
+    await inter.response.send_message('Command has been removed. Use "/stock status" instead', ephemeral=True)
 
 
 bot.setup_hook = setup_hook

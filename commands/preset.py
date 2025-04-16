@@ -116,11 +116,11 @@ class Preset(commands.GroupCog, name='preset'):
         # Build table
         quota_table = ['Category   |  Quantity  | Item Name\n-----------------------------------']
         for cat, quotas in categorized.items():
-            quota_table.append(f"{cat: <10} | {quotas[0]['quantity']: <10} | {quotas[0]['display_name']}")
+            quota_table.append(f"{cat: <10} | {quotas[0].crates: <10} | {quotas[0].display_name}")
             for q in quotas[1:]:
-                quota_table.append(f"{'': <10} | {q['quantity']: <10} | {q['display_name']}")
+                quota_table.append(f"{'': <10} | {q.crates: <10} | {q.display_name}")
         resp_str = '\n'.join(quota_table)
-        resp_str += '\n\nPreset set string:\n'+', '.join([f"{q['info']['display_name']}:{q['quantity']}" for q in quota_list])
+        resp_str += '\n\nPreset set string:\n'+', '.join([f"{q.display_name}:{q.crates}" for q in quota_list])
 
         # Handle overflow
         chunks = helpers.chunk_response(resp_str)

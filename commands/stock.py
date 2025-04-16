@@ -26,9 +26,9 @@ class Stock(commands.GroupCog, name='stock'):
         if not stockpiles:
             await inter.response.send_message('No stockpiles found', ephemeral=True)
             return
-        stock_str = '```Stock ID |     Name     |        Town        |     Type     |   Last Updated\n--------------------------------------------------'
+        stock_str = '```Stock ID |     Name     |        Town        |      Type      |   Last Updated\n--------------------------------------------------'
         for stock in stockpiles:
-            stock_str += "\n{: <8} | {: <12} | {: <18} | {: <12} | {}".format(
+            stock_str += "\n{: <8} | {: <12} | {: <18} | {: <14} | {}".format(
                 stock['id'],
                 stock['name'],
                 stock['town'],
@@ -37,7 +37,6 @@ class Stock(commands.GroupCog, name='stock'):
             )
         stock_str += '```'
         await inter.response.send_message(stock_str)
-
 
     @app_commands.command(name='create', description='Add a new stockpile in the bot')
     @app_commands.describe(
@@ -85,11 +84,23 @@ class Stock(commands.GroupCog, name='stock'):
         item_list = self.db.viewInventory(stock_id)
         categorized = helpers.organizeItemList(item_list)
         # Build response table
-        inv_table = ['Category   | Quantity | Item Name\n-----------------------------------']
+        inv_table = ['Category   | Items | Crates | Total | Name\n----------------------------------------']
         for cat, cat_items in categorized.items():
-            inv_table.append(f"{cat: <10} | {cat_items[0]['quantity']: <8} | {cat_items[0]['display_name']}")
+            inv_table.append("{: <10} | {: <5} | {: <6} | {: <5} | {}".format(
+                cat,
+                cat_items[0].crates,
+                cat_items[0].non_crates,
+                cat_items[0].getTotal(),
+                cat_items[0].display_name
+            ))
             for item in cat_items[1:]:
-                inv_table.append(f"{'': <10} | {item['quantity']: <8} | {item['display_name']}")
+                inv_table.append("{: <10} | {: <6} | {: <10} | {: <5} | {}".format(
+                    '',
+                    item.crates,
+                    item.non_crates,
+                    item.getTotal(),
+                    item.display_name
+                ))
         resp_str = '\n'.join(inv_table)
         # Handle character limit
         chunks = helpers.chunk_response(resp_str)
@@ -171,45 +182,64 @@ class Stock(commands.GroupCog, name='stock'):
             return
         await inter.followup.send('Updated stockpile with ID {}'.format(stock_id))
 
-    @app_commands.command(name='updatemulti', description='Update the inventory of multiple stockpiles using a TSV file')
-    @app_commands.describe(stock_ids='1, 3, 4, ...')
-    async def updateMulti(self, inter: discord.Interaction, stock_ids: str):
-        stock_ids = [int(id.strip()) for id in stock_ids.split(',')]
+    @app_commands.command(name='status', description='The the current status of a stockpile')
+    @app_commands.describe(stock_id='Stock ID of the stockpile to check status', 
+                           show_locked='If True will display items that are tech locked (default False)')
+    async def status(self, inter: discord.Interaction, stock_id: int, show_locked: bool=False):
         try:
             checks.checkRegistration(self.db, inter.guild_id)
-            checks.checkAccessLevel(self.db, inter, 2)
-            for id in stock_ids:
-                checks.checkStockId(self.db, inter, id)
+            checks.checkAccessLevel(self.db, inter, 1)
+            checks.checkStockId(self.db, inter, stock_id)
         except discord.app_commands.CheckFailure as e:
             await inter.response.send_message(str(e), ephemeral=True)
             return
-        # Prompt user for TSV file
-        await inter.response.send_message("Please reply with your TSV file.")
-        def check(msg):
-            return (
-                msg.author == inter.user 
-                and msg.channel == inter.channel
-                and msg.attachments
-            )
-        try:
-            msg = await self.bot.wait_for("message", check=check, timeout=60)  # Wait for 60s
-        except asyncio.TimeoutError:
-            await inter.followup.send("File upload timed out.", ephemeral=True)
+        stock_info, items, quotas, required_amounts = self.db.getStatus(inter.guild_id, stock_id, show_locked)
+        if items == []:
+            await inter.response.send_message(f"No outstanding requirements found for stock ID {stock_id}", ephemeral=True)
             return
+        categorized = helpers.organizeItemList(items)
 
-        # Ingest TSV file
-        attachment = msg.attachments[0]
-        if 'text/tab-separated-values' not in attachment.content_type:
-            await inter.followup.send('Error: File must be a TSV, not {}'.format(attachment.content_type), ephemeral=True)
-            return
-        tsvFile = await attachment.read()
-        tsvFile = tsvFile.decode('utf-8').splitlines()
-        try:
-            stock_ids = self.db.updateMulti(stock_ids, tsvFile)
-        except ValueError as e:
-            await inter.followup.send(str(e), ephemeral=True)
-            return
-        await inter.followup.send(f"Updated stockpiles with IDs {stock_ids}")
+        # Build response table
+        reqs_table = ["({}, {} {}, ID: {}, last updated: {})\n".format(
+            stock_info['name'],
+            stock_info['town'],
+            stock_info['type'],
+            stock_id,
+            helpers.get_relative_time_str(stock_info['last_update'])
+        )]
+        reqs_table.append('Category   | Inventory | Quota | Amount Needed | %Full | Item Name\n-----------------------------------------------------------------')
+        for cat, cat_items in categorized.items():
+            if cat_items[0].category in ['Vehicles', 'Structures']:
+                inventory = cat_items[0].getTotal()
+            else:
+                inventory = cat_items[0].crates
+            reqs_table.append("{: <10} | {: <9} | {: <5} | {: <13} | {: >4.0f}% | {}".format(
+                cat,
+                inventory,
+                quotas[cat_items[0].display_name],
+                required_amounts[cat_items[0].display_name],
+                (inventory / quotas[cat_items[0].display_name]) * 100,
+                cat_items[0].display_name
+            ))
+            for item in cat_items[1:]:
+                if item.category in ['Vehicles', 'Structures']:
+                    inventory = item.getTotal()
+                else:
+                    inventory = item.crates
+                reqs_table.append("{: <10} | {: <9} | {: <5} | {: <13} | {: >4.0f}% | {}".format(
+                    '',
+                    inventory,
+                    quotas[item.display_name],
+                    required_amounts[item.display_name],
+                    (inventory / quotas[item.display_name]) * 100,
+                    item.display_name
+                ))
+        resp_str = '\n'.join(reqs_table)
+        # Handle character limit
+        chunks = helpers.chunk_response(resp_str)
+        await inter.response.send_message(f"```{chunks[0]}```", ephemeral=True)
+        for chunk in chunks[1:]:
+            await inter.followup.send(f"```{chunk}```", ephemeral=True)
 
 
 async def setup(bot):

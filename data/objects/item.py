@@ -12,3 +12,8 @@ class Item():
         self.shippable_type = db_row[9]
         self.ingredients = db_row[10]
         self.description = db_row[11]
+        self.crates = 0
+        self.non_crates = 0
+
+    def getTotal(self):
+        return (self.crates * self.per_crate) + self.non_crates
