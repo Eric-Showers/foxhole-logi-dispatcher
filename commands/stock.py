@@ -77,7 +77,7 @@ class Stock(commands.GroupCog, name='stock'):
     async def view(self, inter: discord.Interaction, stock_id: int):
         try:
             checks.checkRegistration(self.db, inter.guild_id)
-            checks.checkAccessLevel(self.db, inter, 2)
+            checks.checkAccessLevel(self.db, inter, 1)
             checks.checkStockId(self.db, inter, stock_id)
         except discord.app_commands.CheckFailure as e:
             await inter.response.send_message(str(e), ephemeral=True)
@@ -106,7 +106,7 @@ class Stock(commands.GroupCog, name='stock'):
     async def set(self, inter: discord.Interaction, stock_id: int, crates_list: str='', non_crates_list: str=''):
         try:
             checks.checkRegistration(self.db, inter.guild_id)
-            checks.checkAccessLevel(self.db, inter, 2)
+            checks.checkAccessLevel(self.db, inter, 1)
             checks.checkStockId(self.db, inter, stock_id)
         except discord.app_commands.CheckFailure as e:
             await inter.response.send_message(str(e), ephemeral=True)
@@ -127,7 +127,7 @@ class Stock(commands.GroupCog, name='stock'):
     async def update(self, inter: discord.Interaction, stock_id: int):
         try:
             checks.checkRegistration(self.db, inter.guild_id)
-            checks.checkAccessLevel(self.db, inter, 2)
+            checks.checkAccessLevel(self.db, inter, 1)
             checks.checkStockId(self.db, inter, stock_id)
         except discord.app_commands.CheckFailure as e:
             await inter.response.send_message(str(e), ephemeral=True)

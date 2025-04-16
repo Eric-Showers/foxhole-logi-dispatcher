@@ -75,6 +75,35 @@ class DbHandler():
             'description': item_row[11]
         }
     
+    def getItemIds(self, display_name_list):
+        wrong_names = []
+        name_id_dict = {}
+        for display_name in display_name_list:
+            self.cur.execute("""
+                SELECT id FROM items WHERE display_name = ?
+                """, (display_name,)
+            )
+            item_id = self.cur.fetchone()
+            if item_id:
+                name_id_dict[display_name] = item_id[0]
+            else:
+                wrong_names.append(display_name)
+
+        # Return name suggestions if any don't match
+        if wrong_names:
+            similar_names = self.findClosestNames(wrong_names)
+            suggestions = []
+            for name, suggestion in similar_names.items():
+                if suggestion:
+                    suggestions.append(f"{name} -> {suggestion}")
+                else:
+                    suggestions.append(f"{name} -> No match found")
+            raise ValueError("Incorrect item names. Possible matches: \n```{}```".format(
+                '\n'.join(suggestions)
+            ))
+        else:
+            return name_id_dict
+    
     # Fetches all item categories
     def getCategories(self):
         self.cur.execute("SELECT DISTINCT category FROM items")
@@ -238,30 +267,9 @@ class DbHandler():
             item_amounts[name]['non_crates'] = int(amount)
         
         # Get item_id for each item
-        wrong_names = []
-        for display_name in item_amounts:
-            self.cur.execute("""
-                SELECT id FROM items WHERE display_name = ?
-                """, (display_name,)
-            )
-            item_id = self.cur.fetchone()
-            if item_id:
-                item_amounts[display_name]['id'] = item_id[0]
-            else:
-                wrong_names.append(display_name)
-
-        # Return name suggestions if any don't match
-        if wrong_names:
-            similar_names = self.findClosestNames(wrong_names)
-            suggestions = []
-            for name, suggestion in similar_names.items():
-                if suggestion:
-                    suggestions.append(f"{name} -> {suggestion}")
-                else:
-                    suggestions.append(f"{name} -> No match found")
-            raise ValueError("Incorrect item names. Possible matches: \n```{}```".format(
-                '\n'.join(suggestions)
-            ))
+        name_id_dict = self.getItemIds(item_amounts.keys())
+        for name, id in name_id_dict.items():
+            item_amounts[name]['id'] = id
 
         # Update inventory rows, overwrite existing values
         for item_dict in item_amounts.values():
@@ -448,6 +456,11 @@ class DbHandler():
             raise ValueError("Incorrect item names. Possible matches: \n```{}```".format(
                 '\n'.join(suggestions)
             ))
+        
+        # Get item_id for each item
+        name_id_dict = self.getItemIds(item_amounts.keys())
+        for name, id in name_id_dict.items():
+            item_amounts[name]['id'] = id
         
         # Update quotas, overwrite existing values
         for item_id, quantity in quota_ids.items():
