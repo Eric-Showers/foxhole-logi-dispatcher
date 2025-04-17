@@ -88,16 +88,16 @@ class Stock(commands.GroupCog, name='stock'):
         for cat, cat_items in categorized.items():
             inv_table.append("{: <10} | {: <5} | {: <6} | {: <5} | {}".format(
                 cat,
-                cat_items[0].crates,
                 cat_items[0].non_crates,
+                cat_items[0].crates,
                 cat_items[0].getTotal(),
                 cat_items[0].display_name
             ))
             for item in cat_items[1:]:
-                inv_table.append("{: <10} | {: <6} | {: <10} | {: <5} | {}".format(
+                inv_table.append("{: <10} | {: <5} | {: <6} | {: <5} | {}".format(
                     '',
-                    item.crates,
                     item.non_crates,
+                    item.crates,
                     item.getTotal(),
                     item.display_name
                 ))
