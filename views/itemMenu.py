@@ -82,10 +82,9 @@ class FactionButton(discord.ui.Button):
         self.db = db
 
     async def callback(self, inter: discord.Interaction):
-        await inter.response.send_message(
-        "Select a faction to begin browsing items:",
-        view=FactionSelectView(self.db),
-        ephemeral=True
+        await inter.response.edit_message(
+        content="Select a faction to begin browsing items:",
+        view=FactionSelectView(self.db)
     )
 
 
@@ -110,7 +109,7 @@ class CategoryDropdown(discord.ui.Select):
         for item in view.get_page_items():
             embed.add_field(name=item.display_name, value=item.description, inline=False)
 
-        await inter.response.send_message(embed=embed, view=view, ephemeral=True)
+        await inter.response.edit_message(embed=embed, view=view)
 
 
 class CategoryDropdownView(discord.ui.View):
@@ -129,24 +128,21 @@ class FactionSelectView(discord.ui.View):
 
     @discord.ui.button(label="Warden", style=discord.ButtonStyle.primary)
     async def warden(self, inter: discord.Interaction, button: discord.ui.Button):
-        await inter.response.send_message(
-            "Select a category:",
-            view=CategoryDropdownView(self.db, faction="Wardens"),
-            ephemeral=True
+        await inter.response.edit_message(
+            content="Select a category:",
+            view=CategoryDropdownView(self.db, faction="Wardens")
         )
 
     @discord.ui.button(label="Colonial", style=discord.ButtonStyle.success)
     async def colonial(self, inter: discord.Interaction, button: discord.ui.Button):
-        await inter.response.send_message(
-            "Select a category:",
-            view=CategoryDropdownView(self.db, faction="Colonials"),
-            ephemeral=True
+        await inter.response.edit_message(
+            content="Select a category:",
+            view=CategoryDropdownView(self.db, faction="Colonials")
         )
 
     @discord.ui.button(label="Both", style=discord.ButtonStyle.secondary)
     async def both(self, inter: discord.Interaction, button: discord.ui.Button):
-        await inter.response.send_message(
-            "Select a category:",
-            view=CategoryDropdownView(self.db, faction=None),
-            ephemeral=True
+        await inter.response.edit_message(
+            content="Select a category:",
+            view=CategoryDropdownView(self.db, faction=None)
         )
