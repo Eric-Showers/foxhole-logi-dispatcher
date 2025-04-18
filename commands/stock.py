@@ -36,7 +36,7 @@ class Stock(commands.GroupCog, name='stock'):
                 helpers.get_relative_time_str(stock['last_update'])
             )
         stock_str += '```'
-        await inter.response.send_message(stock_str)
+        await inter.response.send_message(stock_str, ephemeral=True)
 
     @app_commands.command(name='create', description='Add a new stockpile in the bot')
     @app_commands.describe(
@@ -56,7 +56,7 @@ class Stock(commands.GroupCog, name='stock'):
         except ValueError as e:
             await inter.response.send_message(str(e), ephemeral=True)
             return
-        await inter.response.send_message(f"Created stockpile named {name} at the {type} in {town}")
+        await inter.response.send_message(f"Created stockpile named {name} at the {type} in {town}", ephemeral=True)
 
     @app_commands.command(name='delete', description='Delete a stockpile from the bot')
     @app_commands.describe(stock_id='Stock ID to delete')
@@ -69,7 +69,7 @@ class Stock(commands.GroupCog, name='stock'):
             await inter.response.send_message(str(e), ephemeral=True)
             return
         self.db.delete(stock_id)
-        await inter.response.send_message(f"Deleted stockpile with ID {stock_id}")
+        await inter.response.send_message(f"Deleted stockpile with ID {stock_id}", ephemeral=True)
 
     @app_commands.command(name='view', description='View the contents of a stockpile')
     @app_commands.describe(stock_id='Stock ID to view')
@@ -104,9 +104,9 @@ class Stock(commands.GroupCog, name='stock'):
         resp_str = '\n'.join(inv_table)
         # Handle character limit
         chunks = helpers.chunk_response(resp_str)
-        await inter.response.send_message(f"```{chunks[0]}```")
+        await inter.response.send_message(f"```{chunks[0]}```", ephemeral=True)
         for chunk in chunks[1:]:
-            await inter.followup.send(f"```{chunk}```")
+            await inter.followup.send(f"```{chunk}```", ephemeral=True)
 
     @app_commands.command(name='set', description='Set the inventory of a stockpile using a list of item amounts')
     @app_commands.describe(
@@ -130,7 +130,7 @@ class Stock(commands.GroupCog, name='stock'):
         except ValueError as e:
             await inter.response.send_message(str(e), ephemeral=True)
             return
-        await inter.response.send_message(f"Stock ID {stock_id} inventory has been updated")
+        await inter.response.send_message(f"Stock ID {stock_id} inventory has been updated", ephemeral=True)
 
 
     @app_commands.command(name='update', description='Update the inventory of a stockpile using a screenshot')
@@ -145,7 +145,7 @@ class Stock(commands.GroupCog, name='stock'):
             return
         
         # Prompt user for screenshot
-        await inter.response.send_message("Please reply with your screenshot.")
+        await inter.response.send_message("Please reply with your screenshot.", ephemeral=True)
         def check(msg):
             return (
                 msg.author == inter.user 
@@ -180,7 +180,7 @@ class Stock(commands.GroupCog, name='stock'):
         except ValueError as e:
             await inter.followup.send(str(e), ephemeral=True)
             return
-        await inter.followup.send('Updated stockpile with ID {}'.format(stock_id))
+        await inter.followup.send('Updated stockpile with ID {}'.format(stock_id), ephemeral=True)
 
     @app_commands.command(name='status', description='The the current status of a stockpile')
     @app_commands.describe(stock_id='Stock ID of the stockpile to check status', 

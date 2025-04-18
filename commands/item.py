@@ -62,9 +62,9 @@ class Item(commands.GroupCog, name='item'):
         resp_str = '\n'.join(locks_table)
         # Handle character limit
         chunks = helpers.chunk_response(resp_str)
-        await inter.response.send_message(f"```{chunks[0]}```")
+        await inter.response.send_message(f"```{chunks[0]}```", ephemeral=True)
         for chunk in chunks[1:]:
-            await inter.followup.send(f"```{chunk}```")
+            await inter.followup.send(f"```{chunk}```", ephemeral=True)
         
 
 async def setup(bot):
