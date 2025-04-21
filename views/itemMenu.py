@@ -2,7 +2,7 @@ import discord
 from discord.ext import commands
 
 from data.db_io import DbHandler
-from data.objects.item import Item
+from data.objects.Item import Item
 
 ITEMS_PER_PAGE = 10
 

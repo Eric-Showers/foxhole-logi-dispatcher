@@ -3,7 +3,7 @@ import sqlite3
 import csv
 import difflib
 
-from data.objects.item import Item
+from data.objects.Item import Item
 
 TSV_HEADER = 'Stockpile Title	Stockpile Name	Structure Type	Quantity	Name	Crated?	Per Crate	Total	Description	CodeName'
 
