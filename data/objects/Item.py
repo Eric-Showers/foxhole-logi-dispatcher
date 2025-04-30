@@ -12,7 +12,11 @@ class Item():
         self.faction = db_row[7]
         self.reserve_max_quantity = db_row[8]
         self.shippable_type = db_row[9]
-        self.ingredients = json.loads(db_row[10])
+        if db_row[10] == '':
+            self.ingredients = db_row[10]
+        else:
+            self.ingredients = json.loads(db_row[10])
+
         self.description = db_row[11]
         self.crates = 0
         self.non_crates = 0
