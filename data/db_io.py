@@ -514,7 +514,7 @@ class DbHandler():
         )
         result = self.cur.fetchall()
         if not result:
-            return {}
+            return {}, [], {}, {}
         
         # Get locked items
         self.cur.execute("SELECT item_id FROM locked_items WHERE guild_id = ?", (guild_id,))
