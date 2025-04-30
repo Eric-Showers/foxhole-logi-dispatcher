@@ -84,29 +84,22 @@ class Stock(commands.GroupCog, name='stock'):
         item_list = self.db.viewInventory(stock_id)
         categorized = helpers.organizeItemList(item_list)
         # Build response table
-        inv_table = ['Category   | Items | Crates | Total | Name\n----------------------------------------']
+        inv_table = ['Crated | Uncrated | Total | Name']
         for cat, cat_items in categorized.items():
-            inv_table.append("{: <10} | {: <5} | {: <6} | {: <5} | {}".format(
-                cat,
-                cat_items[0].non_crates,
-                cat_items[0].crates,
-                cat_items[0].getTotal(),
-                cat_items[0].display_name
-            ))
-            for item in cat_items[1:]:
-                inv_table.append("{: <10} | {: <5} | {: <6} | {: <5} | {}".format(
-                    '',
-                    item.non_crates,
+            inv_table.append(f"{cat:_^32}")
+            for item in cat_items:
+                inv_table.append("{: <6} | {: <8} | {: <5} | {}".format(
                     item.crates,
+                    item.non_crates,
                     item.getTotal(),
                     item.display_name
                 ))
         resp_str = '\n'.join(inv_table)
         # Handle character limit
         chunks = helpers.chunk_response(resp_str)
-        await inter.response.send_message(f"```{chunks[0]}```", ephemeral=True)
+        await inter.response.send_message(f"```\n{chunks[0]}```", ephemeral=True)
         for chunk in chunks[1:]:
-            await inter.followup.send(f"```{chunk}```", ephemeral=True)
+            await inter.followup.send(f"```\n{chunk}```", ephemeral=True)
 
     @app_commands.command(name='set', description='Set the inventory of a stockpile using a list of item amounts')
     @app_commands.describe(
@@ -207,27 +200,15 @@ class Stock(commands.GroupCog, name='stock'):
             stock_id,
             helpers.get_relative_time_str(stock_info['last_update'])
         )]
-        reqs_table.append('Category   | Inventory | Quota | Amount Needed | %Full | Item Name\n-----------------------------------------------------------------')
+        reqs_table.append('Current | Quota | Demand | %Full | Item Name')
         for cat, cat_items in categorized.items():
-            if cat_items[0].category in ['Vehicles', 'Structures']:
-                inventory = cat_items[0].getTotal()
-            else:
-                inventory = cat_items[0].crates
-            reqs_table.append("{: <10} | {: <9} | {: <5} | {: <13} | {: >4.0f}% | {}".format(
-                cat,
-                inventory,
-                quotas[cat_items[0].display_name],
-                required_amounts[cat_items[0].display_name],
-                (inventory / quotas[cat_items[0].display_name]) * 100,
-                cat_items[0].display_name
-            ))
-            for item in cat_items[1:]:
+            reqs_table.append(f"{cat:_^44}")
+            for item in cat_items:
                 if item.category in ['Vehicles', 'Structures']:
                     inventory = item.getTotal()
                 else:
                     inventory = item.crates
-                reqs_table.append("{: <10} | {: <9} | {: <5} | {: <13} | {: >4.0f}% | {}".format(
-                    '',
+                reqs_table.append("{: <7} | {: <5} | {: <6} | {: >4.0f}% | {}".format(
                     inventory,
                     quotas[item.display_name],
                     required_amounts[item.display_name],
@@ -237,9 +218,9 @@ class Stock(commands.GroupCog, name='stock'):
         resp_str = '\n'.join(reqs_table)
         # Handle character limit
         chunks = helpers.chunk_response(resp_str)
-        await inter.response.send_message(f"```{chunks[0]}```", ephemeral=True)
+        await inter.response.send_message(f"```\n{chunks[0]}```", ephemeral=True)
         for chunk in chunks[1:]:
-            await inter.followup.send(f"```{chunk}```", ephemeral=True)
+            await inter.followup.send(f"```\n{chunk}```", ephemeral=True)
 
 
 async def setup(bot):

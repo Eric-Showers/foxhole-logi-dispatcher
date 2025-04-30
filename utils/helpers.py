@@ -1,8 +1,11 @@
 import time
 import asyncio
 import os
+from collections import OrderedDict
 
 from playwright.async_api import async_playwright
+
+from data.objects.Item import Item
 
 # Converts a timestamp to a relative time string (eg. "6 hours ago")
 def get_relative_time_str(prev_time):
@@ -36,21 +39,36 @@ def chunk_response(table_str):
     return chunks
 
 
-# Takes a list of item dicts (w/ 'quantity' & 'info') and sorts into categories & descending order
-def organizeItemList(item_list):
-    # Sort quotas into categories
-    categorized = {}
+# Takes a list of Items and sorts into categories & descending order
+def organizeItemList(item_list: list[Item])-> dict:
+    # Sort items into categories
+    categorized = OrderedDict({
+        'SmallArms': [],
+        'HeavyArms': [],
+        'HeavyAmmo': [],
+        'Utility': [],
+        'Medical': [],
+        'Supplies': [],
+        'Uniforms': [],
+        'Vehicles': [],
+        'Structures': [],
+        'Other': []
+    })
     for item in item_list:
-        if item.category not in categorized:
-            categorized[item.category] = []
         categorized[item.category].append(item)
     # Sort each category by quantity, descending order
+    empty_cats = []
     for cat, items in categorized.items():
-        categorized[cat] = sorted(
-            items, 
-            key=lambda x: x.getTotal(), 
-            reverse=True
-        )
+        if items == []:
+            empty_cats.append(cat)
+        else:
+            categorized[cat] = sorted(
+                items, 
+                key=lambda x: x.getTotal(), 
+                reverse=True
+            )
+    for cat in empty_cats:
+        del categorized[cat]
     return categorized
 
 

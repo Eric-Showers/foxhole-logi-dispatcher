@@ -59,19 +59,19 @@ class Quota(commands.GroupCog, name='quota'):
         
         # Build table
         categorized = helpers.organizeItemList(item_list)
-        quota_table = ['Category   |  Quantity  | Item Name\n-----------------------------------']
+        quota_table = ['  #  | Item Name']
         for cat, quotas in categorized.items():
-            quota_table.append(f"{cat: <10} | {quotas[0].crates: <10} | {quotas[0].display_name}")
-            for q in quotas[1:]:
-                quota_table.append(f"{'': <10} | {q.crates: <10} | {q.display_name}")
+            quota_table.append(f"{cat:_^20}")
+            for q in quotas:
+                quota_table.append(f"{q.crates: <4} | {q.display_name}")
         resp_str = '\n'.join(quota_table)
         resp_str += '\n\nQuota set string:\n'+', '.join([f"{q.display_name}:{q.crates}" for q in item_list])
         
         # Handle overflow
         chunks = helpers.chunk_response(resp_str)
-        await inter.response.send_message(f"```{chunks[0]}```", ephemeral=True)
+        await inter.response.send_message(f"```\n{chunks[0]}```", ephemeral=True)
         for chunk in chunks[1:]:
-            await inter.followup.send(f"```{chunk}```", ephemeral=True)
+            await inter.followup.send(f"```\n{chunk}```", ephemeral=True)
 
 
 async def setup(bot):

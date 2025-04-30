@@ -54,17 +54,17 @@ class Item(commands.GroupCog, name='item'):
             return
         
         categorized = helpers.organizeItemList(item_list)
-        locks_table = ['Category   | Item Name\n-----------------------------------']
+        locks_table = []
         for cat, cat_items in categorized.items():
-            locks_table.append(f"{cat: <10} | {cat_items[0].display_name}")
-            for item in cat_items[1:]:
-                locks_table.append(f"{'': <10} | {item.display_name}")
+            locks_table.append(f"{cat:_^20}")
+            for item in cat_items:
+                locks_table.append(item.display_name)
         resp_str = '\n'.join(locks_table)
         # Handle character limit
         chunks = helpers.chunk_response(resp_str)
-        await inter.response.send_message(f"```{chunks[0]}```", ephemeral=True)
+        await inter.response.send_message(f"```\n{chunks[0]}```", ephemeral=True)
         for chunk in chunks[1:]:
-            await inter.followup.send(f"```{chunk}```", ephemeral=True)
+            await inter.followup.send(f"```\n{chunk}```", ephemeral=True)
         
 
 async def setup(bot):
